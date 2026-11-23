@@ -1,13 +1,34 @@
 # TD FX Blox
 
 Hand-played video effects for TouchDesigner. Each block takes one video TOP in,
-passes it through at idle, and reacts to a velocity-sensitive trigger. The
-[catalog](CATALOG.md) lists the 32 effects carried over from THUNDERGONG! 2026.
+passes it through at idle, and reacts to a velocity-sensitive trigger. See the
+[catalog](CATALOG.md) for the available effects.
 
 This is a source scaffold. The first pack of prebuilt components is pending
 live checks in TouchDesigner.
 
-## Try three effects
+## Build and try the effects
+
+From the checkout, run this on a Mac with an activated TouchDesigner installation
+and a desktop session. The launcher opens a dedicated scratch project, exports
+one `.tox` per selected effect into `dist/`, and closes the build session.
+
+```sh
+python3 tools/build_tox.py zoom_punch stutter shockwave
+python3 tools/build_tox.py --all
+```
+
+Use `--output` to export to another directory. If TouchDesigner is installed
+somewhere other than `/Applications/TouchDesigner.app`, pass the path to its
+executable with `--touchdesigner` or set `TOUCHDESIGNER_BIN`.
+
+Drag a `.tox` into a fresh project. Wire a TOP with moving video or a generated
+test pattern to the block, then wire the block to a Null TOP and view the result.
+On the block's **Control** page, change **Trigger** from 0 to 1 to play it and
+back to 0 to release or rearm it. Try a smaller value to see how it responds to
+velocity.
+
+### Build from the Textport
 
 Open a blank TouchDesigner project. Paste the following into the Textport,
 changing the path to your checkout if needed.
@@ -17,12 +38,8 @@ import runpy
 runpy.run_path("/Users/yourname/Projects/td-fxblox/build.py", init_globals=dict(globals(), FXBLOX={"blocks": ["zoom_punch", "stutter", "shockwave"]}), run_name="__main__")
 ```
 
-The build creates the three components in `/vj_block_library` and exports them
-to `dist/` beside `build.py`. Drag a `.tox` from there into a fresh project.
-Wire a TOP with moving video or a generated test pattern to the block, then wire
-the block to a Null TOP and view the result. On the block's **Control** page,
-change **Trigger** from 0 to 1 to play it and back to 0 to release or rearm it.
-Try a smaller trigger value to see how the effect responds to velocity.
+The Textport build creates the three components in `/vj_block_library` and
+exports them to `dist/` beside `build.py`.
 
 Omit `blocks` from the options to build the entire catalog. Set `output` to an
 absolute directory to export elsewhere. Building again replaces the selected

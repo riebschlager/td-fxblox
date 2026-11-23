@@ -44,8 +44,9 @@ after load, the return to idle, and any state, retrigger, or reset behavior
 specific to the effect. CI uses the same suite. Simulation verifies Python state
 and wiring against a stub. Shader compilation, pixels, and timing need a live run.
 
-Build the named effect in a scratch project. Load the resulting `.tox` into a
-fresh project, confirm it cooks without errors, and play it at different
+Run `python3 tools/build_tox.py <effect_id>` on the TouchDesigner machine to
+export from a scratch project. Load the resulting `.tox` into a fresh project,
+confirm it cooks without errors, and play it at different
 velocities. Check idle output and reset, and use TouchDesigner's Performance
 Monitor for effects that buffer frames or use heavier shaders. Save any tuned
 defaults in the source and add or update the effect's entry in [the catalog](CATALOG.md).
@@ -55,3 +56,9 @@ files together, and record the effects, TouchDesigner build, and platform tested
 A copied component needs to be replaced or deliberately upgraded to use a new
 engine. Preserve existing parameter names where possible so people can carry
 their mappings forward.
+
+`tools/Build.toe` contains a single startup Execute DAT at
+`/project1/build_on_start`. If its source in `tools/td_startup.py` changes,
+paste that source into the DAT and save the project. Keep the DAT's **Start**
+toggle enabled. The export worker in `tools/td_build.py` is loaded from a fresh
+copy each time the launcher runs.
