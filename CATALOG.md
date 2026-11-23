@@ -1,7 +1,7 @@
 # Effect catalog
 
-These are the 32 effects imported from the show project. The last column records the status
-in the original show catalog. Every effect still needs a smoke test from a standalone build.
+The first 32 effects were imported from the show project. The last column records the status
+in the original show catalog, or `new` for effects written here. Every effect still needs a smoke test from a standalone build.
 For release notes, record the TouchDesigner build and the effects tested in it.
 
 | Effect | Architecture | Show catalog |
@@ -12,6 +12,7 @@ For release notes, record the TouchDesigner build and the effects tested in it.
 | [Confetti Cannon](blocks/confetti_cannon.py) | Pixel-level | approved |
 | [Fault Line](blocks/fault_line.py) | Pixel-level | simulated |
 | [Fault Plates](blocks/fault_plates.py) | Pixel-level | approved |
+| [Glitch Smear](blocks/glitch_smear.py) | Feedback loop, block-matching motion | new |
 | [Gong Ring](blocks/gong_ring.py) | Pixel-level | approved |
 | [Gradient Flow](blocks/gradient_flow.py) | Pixel-level | approved |
 | [Gradient Map](blocks/gradient_map.py) | Pixel-level | approved |

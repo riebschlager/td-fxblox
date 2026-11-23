@@ -7723,3 +7723,266 @@ def test_kb_hit_mode_holds_then_leaves(world, kb):
     assert kb_view(kb)[3] == 1.0
     lift(world, kb, frames=FPS + KB_RELEASE_FRAMES)
     assert_kb_at_rest(kb)
+
+
+# ------------------------------------------------------------ Glitch Smear playing
+
+@pytest.fixture
+def smear(world):
+    return world.block('glitch_smear')
+
+
+def smear_mosh(block):
+    return uniforms(block, 'mosh', 0)
+
+
+def smear_grid(block):
+    return uniforms(block, 'mosh', 1)
+
+
+def smear_heal(block):
+    return uniforms(block, 'composite', 0)
+
+
+def assert_smear_at_rest(block):
+    assert block.op('switch').par.index.val == 0
+    for name, index in (('motion', 0), ('field', 0), ('mosh', 0), ('mosh', 1), ('composite', 0)):
+        assert uniforms(block, name, index) == (0.0, 0.0, 0.0, 0.0), name
+
+
+def finish_smear(world, block):
+    block.par.Trigger = 0.0
+    world.tick(block, FPS * 2)
+
+
+def test_smear_wiring(smear):
+    block = smear
+    source = block.op('in1')
+    assert block.op('previous').inputs == {0: source}
+    assert block.op('motion').inputs == {0: source, 1: block.op('previous'), 2: block.op('field_last')}
+    assert block.op('field_last').inputs == {0: block.op('motion')}
+    assert block.op('field_last').par.top.val == 'field'
+    assert block.op('field').inputs == {0: block.op('motion'), 1: block.op('field_last')}
+    assert block.op('mosh_last').inputs == {0: source}
+    assert block.op('mosh_last').par.top.val == 'mosh'
+    assert block.op('mosh').type == 'glslmultiTOP'
+    assert block.op('mosh').inputs == {0: source, 1: block.op('previous'), 2: block.op('field'), 3: block.op('mosh_last')}
+    assert block.op('composite').inputs == {0: source, 1: block.op('mosh')}
+    assert block.op('switch').inputs == {0: source, 1: block.op('composite')}
+    assert block.op('out1').inputs[0] is block.op('switch')
+
+
+def test_smear_previous_frame_is_one_cook_back(smear):
+    par = smear.op('previous').par
+    assert (par.active.val, par.cachesize.val, par.outputindex.val, par.interp.val) == (True, 2, -1, False)
+
+
+def test_smear_field_is_one_texel_per_block(smear):
+    motion = smear.op('motion').par
+    assert motion.outputresolution.val == 'custom'
+    assert 'Blocksize' in motion.resolutionw.expr and "op('in1').width" in motion.resolutionw.expr
+    assert 'Blocksize' in motion.resolutionh.expr and "op('in1').height" in motion.resolutionh.expr
+    assert motion.inputfiltertype.val == 'mipmap'
+    for name in ('motion', 'field', 'field_last'):
+        assert smear.op(name).par.format.val == 'rgba32float'
+    for name in ('mosh', 'mosh_last'):
+        assert smear.op(name).par.format.val == 'rgba16float'
+    assert smear.op('composite').par.format.val == 'useinput'
+    assert smear.par.Blocksize.menuNames == ['8', '16', '32', '64']
+    assert smear.par.Blocksize.val == '16'
+
+
+def test_smear_shader_uniforms_match_their_entries(smear):
+    for node in smear.children:
+        if node.type not in ('glslTOP', 'glslmultiTOP'):
+            continue
+        text = smear.op(node.par.pixeldat.val).text
+        declared = re.findall(r'^uniform vec\d (\w+);', text, re.M)
+        entries = [getattr(node.par, 'vec%dname' % index).val for index in range(node.seq.vec.numBlocks)]
+        assert entries == declared, node.name
+
+
+def test_smear_freezes_on_the_very_first_frame(world, smear):
+    smear.par.Trigger = 1.0
+    world.tick(smear)
+    assert smear.op('switch').par.index.val == 1
+    assert smear_grid(smear)[2] == 1.0, 'the mosh pass takes this frame as the reference'
+    assert uniforms(smear, 'motion', 0)[:2] == (16.0, 0.0), 'no search against a stale frame'
+    assert uniforms(smear, 'field', 0)[1] == 1.0, 'held vectors start clear'
+    world.tick(smear)
+    assert smear_grid(smear)[2] == 0.0
+    assert uniforms(smear, 'motion', 0)[:2] == (16.0, 1.0)
+    assert uniforms(smear, 'field', 0)[1] == 0.0
+
+
+def test_smear_velocity_scales_the_push(world, smear):
+    smear.par.Smear = 1.0
+    smear.par.Trigger = 0.25
+    world.tick(smear)
+    assert smear_mosh(smear)[0] == pytest.approx(1.0 + 3.0 * 0.25)
+    finish_smear(world, smear)
+    smear.par.Trigger = 1.0
+    world.tick(smear)
+    assert smear_mosh(smear)[0] == pytest.approx(4.0)
+
+
+def test_smear_zero_moves_at_true_speed(world, smear):
+    smear.par.Smear = 0.0
+    smear.par.Trigger = 1.0
+    world.tick(smear)
+    assert smear_mosh(smear)[0] == 1.0
+
+
+def test_smear_attack_ramps_the_push_from_a_still(world, smear):
+    smear.par.Attack = 0.2
+    smear.par.Trigger = 1.0
+    world.tick(smear)
+    assert smear_mosh(smear)[0] == 0.0
+    gains = []
+    for _ in range(int(FPS * 0.2)):
+        world.tick(smear)
+        gains.append(smear_mosh(smear)[0])
+    assert gains == sorted(gains)
+    assert gains[-1] == pytest.approx(1.0 + 3.0 * 0.35)
+
+
+def test_smear_bloom_sets_the_vector_decay(world, smear):
+    smear.par.Trigger = 1.0
+    smear.par.Bloom = 0.0
+    world.tick(smear)
+    assert uniforms(smear, 'field', 0)[0] == 0.0
+    smear.par.Bloom = 1.0
+    world.tick(smear)
+    assert uniforms(smear, 'field', 0)[0] == pytest.approx(0.5 ** (1.0 / (FPS * 2.0)))
+    smear.par.Bloom = 0.5
+    world.tick(smear)
+    assert uniforms(smear, 'field', 0)[0] == pytest.approx(0.5 ** (1.0 / (FPS * 0.5)))
+
+
+def test_smear_controls_reach_the_shader(world, smear):
+    smear.par.Blocksize = '32'
+    smear.par.Liquid = 0.6
+    smear.par.Ghost = 0.7
+    smear.par.Freeze = 0.5
+    smear.par.Intra = 1.0
+    smear.par.Mix = 0.4
+    smear.par.Trigger = 1.0
+    world.tick(smear, 2)
+    mosh = smear_mosh(smear)
+    assert mosh[1:] == pytest.approx((0.7, 0.06, 0.06))
+    assert smear_grid(smear) == (32.0, 0.6, 0.0, 0.0)
+    assert uniforms(smear, 'motion', 0)[0] == 32.0
+    heal = smear_heal(smear)
+    assert (heal[0], heal[2], heal[3]) == (0.0, 32.0, 0.4)
+
+
+def test_smear_intra_off_never_refreshes(world, smear):
+    smear.par.Intra = 0.0
+    smear.par.Trigger = 1.0
+    world.tick(smear)
+    assert smear_mosh(smear)[3] == 1000.0
+
+
+def test_smear_holds_while_pressed(world, smear):
+    smear.par.Trigger = 1.0
+    world.tick(smear, FPS * 3)
+    assert smear.op('switch').par.index.val == 1
+    assert smear_heal(smear)[0] == 0.0
+
+
+def test_smear_release_heals_block_by_block_and_keeps_the_push(world, smear):
+    smear.par.Trigger = 1.0
+    world.tick(smear, 10)
+    push = smear_mosh(smear)[0]
+    smear.par.Trigger = 0.0
+    previous = 0.0
+    for _ in range(int(FPS * 0.8) - 1):
+        world.tick(smear)
+        heal = smear_heal(smear)[0]
+        assert previous < heal < 1.0
+        assert smear_mosh(smear)[0] == push
+        previous = heal
+    world.tick(smear, 2)
+    assert_smear_at_rest(smear)
+
+
+def test_smear_each_hit_heals_in_a_new_order(world, smear):
+    seeds = []
+    for _ in range(3):
+        smear.par.Trigger = 1.0
+        world.tick(smear)
+        seed = smear_heal(smear)[1]
+        world.tick(smear, 5)
+        assert smear_heal(smear)[1] == seed
+        seeds.append(seed)
+        finish_smear(world, smear)
+    assert len(set(seeds)) == 3
+
+
+def test_smear_retrigger_refreezes_and_stops_healing(world, smear):
+    smear.par.Trigger = 1.0
+    world.tick(smear, 10)
+    smear.par.Trigger = 0.0
+    world.tick(smear, 20)
+    assert smear_heal(smear)[0] > 0.0
+    smear.par.Trigger = 1.0
+    world.tick(smear)
+    assert smear_grid(smear)[2] == 1.0
+    assert smear_heal(smear)[0] == 0.0
+
+
+def test_smear_hit_mode_holds_then_heals(world, smear):
+    smear.par.Mode = 'hit'
+    smear.par.Hold = 0.5
+    smear.par.Trigger = 1.0
+    world.tick(smear)
+    smear.par.Trigger = 0.0
+    world.tick(smear, int(FPS * 0.4))
+    assert smear_heal(smear)[0] == 0.0
+    world.tick(smear, int(FPS * 0.4))
+    assert 0.0 < smear_heal(smear)[0] < 1.0
+    world.tick(smear, FPS)
+    assert_smear_at_rest(smear)
+
+
+def test_smear_returns_exactly_to_rest(world, smear):
+    smear.par.Trigger = 1.0
+    world.tick(smear, 10)
+    finish_smear(world, smear)
+    assert_smear_at_rest(smear)
+
+
+def test_smear_panic_and_held_pad_does_not_refire(world, smear):
+    smear.par.Trigger = 1.0
+    world.tick(smear, 10)
+    world.panic = 1.0
+    world.tick(smear)
+    assert_smear_at_rest(smear)
+    world.panic = 0.0
+    world.tick(smear, 3)
+    assert_smear_at_rest(smear)
+
+
+def test_smear_reset_clears_the_loops(world, smear):
+    smear.par.Trigger = 1.0
+    world.tick(smear, 5)
+    before = {name: smear.op(name).par.resetpulse.pulses for name in ('previous', 'field_last', 'mosh_last')}
+    smear.op('reset_watch').module.onPulse()
+    for name, count in before.items():
+        assert smear.op(name).par.resetpulse.pulses == count + 1, name
+    assert_smear_at_rest(smear)
+
+
+def test_smear_frame_gap_resets(world, smear):
+    smear.par.Trigger = 1.0
+    world.tick(smear, 5)
+    world.abs_time.frame += 31
+    world.tick(smear)
+    assert_smear_at_rest(smear)
+
+
+def test_smear_max_hold(world, smear):
+    smear.par.Maxhold = 0.1
+    smear.par.Trigger = 1.0
+    world.tick(smear, FPS * 2)
+    assert_smear_at_rest(smear)

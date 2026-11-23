@@ -49,5 +49,8 @@ The [contributor guide](CONTRIBUTING.md) covers the block interface, simulation,
 and live checks. Codex can use the repo-local [`td-vj-block` skill](.agents/skills/td-vj-block/SKILL.md)
 for the same workflow.
 
+The [development roadmap](ROADMAP.md) lays out the preview workbench, planned
+block interface changes, and how to grow and release the effect library.
+
 The effect sources and simulation harness were extracted from THUNDERGONG! 2026
 at commit `aa4aa5623596175b923926a5c16195644eda24f7`.
