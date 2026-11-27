@@ -1,4 +1,4 @@
-# Gradient Map: the picture maps into brand-color bands, then the bands recede through its tones or across the wall
+# Gradient Map: the picture maps into palette-colored bands, then the bands recede through its tones or across the wall
 
 # Measures the frame's tonal range into one pixel: red is the low end, green the high end.
 # Mean and deviation rather than min and max, so a stray pixel can't make the bands jump.
@@ -76,31 +76,11 @@ const float WIPE = 0.1;       // width of the wipe's soft edge
 const int DITHER_CELL = 2;    // wall pixels per dissolve dot
 const float BAYER[16] = float[16](0.0, 8.0, 2.0, 10.0, 12.0, 4.0, 14.0, 6.0, 3.0, 11.0, 1.0, 9.0, 15.0, 7.0, 13.0, 5.0);
 
-// Exact brand values, as 8-bit channels.
-const vec3 BLACK = vec3(0.0, 0.0, 0.0) / 255.0;
-const vec3 BLUE = vec3(37.0, 115.0, 255.0) / 255.0;
-const vec3 PINK = vec3(255.0, 141.0, 255.0) / 255.0;
-const vec3 YELLOW = vec3(243.0, 221.0, 62.0) / 255.0;
-const vec3 RED = vec3(255.0, 66.0, 77.0) / 255.0;
-const vec3 CYAN = vec3(68.0, 248.0, 255.0) / 255.0;
-const vec3 WHITE = vec3(255.0, 255.0, 255.0) / 255.0;
-
-const int MAX_STOPS = 6;
-const int PALETTES = 5;
-const int COUNTS[PALETTES] = int[PALETTES](4, 4, 4, 3, 6);
-// One row per palette, shadows to highlights. Short rows are padded and the padding is never read.
-const vec3 STOPS[PALETTES * MAX_STOPS] = vec3[PALETTES * MAX_STOPS](
-    BLACK, BLUE, CYAN, WHITE, WHITE, WHITE,    // cover
-    BLACK, RED, PINK, YELLOW, YELLOW, YELLOW,  // hot
-    BLACK, BLUE, CYAN, YELLOW, YELLOW, YELLOW, // sunburst
-    BLACK, YELLOW, WHITE, WHITE, WHITE, WHITE, // ink
-    BLACK, BLUE, RED, PINK, CYAN, YELLOW       // disco
-);
+@@PALETTE_GLSL@@
 
 vec3 stopColor(int palette, int index)
 {
-    int last = COUNTS[palette] - 1;
-    return STOPS[palette * MAX_STOPS + clamp(index, 0, last)];
+    return STOPS[palette * STOP_COUNT + clamp(index, 0, STOP_COUNT - 1)];
 }
 
 void main()
@@ -115,7 +95,7 @@ void main()
 
     // Band centers land on whole numbers, so the fraction is the distance to the next band.
     int palette = clamp(int(uMap.x + 0.5), 0, PALETTES - 1);
-    float position = tone * float(COUNTS[palette]) - 0.5;
+    float position = tone * float(STOP_COUNT) - 0.5;
     float band = floor(position);
     float width = mix(EDGE_MIN, 1.0, uMap.y);
     float blend = smoothstep(0.5 - width * 0.5, 0.5 + width * 0.5, position - band);
@@ -145,7 +125,7 @@ void main()
 '''
 
 EFFECT_SOURCE = r'''
-PALETTES = {"cover": 0.0, "hot": 1.0, "sunburst": 2.0, "ink": 3.0, "disco": 4.0}
+PALETTES = @@PALETTE_INDEX@@
 REVEALS = {"tone": 0.0, "left": 1.0, "right": 2.0, "center": 3.0, "dissolve": 4.0}
 MAX_BLEED = 0.06   # blur reach in wall heights at full Bleed and a full-strength press
 FULL_BLEED = 0.004 # below this reach the blurred brightness eases back to the sharp one
@@ -180,9 +160,9 @@ def apply(block, env):
         return
 
     switch.par.index = 1
-    palette = PALETTES[block.par.Palette.eval()]
+    palette = PALETTES.get(block.par.Palette.eval(), 0)
     reveal = max(0.0, min(1.0, env.level * env.velocity))
-    # Shift is centered: tones slide through the palette, which stays in order with black darkest.
+    # Shift is centered: tones slide through the palette in its original stop order.
     _write(node, 0, palette, _clamped(block.par.Softness), _clamped(block.par.Shift) - 0.5, reveal)
     # A fresh press measures the frame outright, so it never eases in from an old scene.
     _write(op("levels"), 0, 1.0 if env.started else EASE, 0.0, 0.0, 0.0)
@@ -218,7 +198,7 @@ def build(library):
     # Release is how long the bands take to recede through the tones.
     add_control_page(block, {"mode": "gate", "attack": 0.0, "hold": 0.25, "release": 0.15, "curve": 1.0, "velocitydepth": 0.6})
     page = block.appendCustomPage("Gradient Map")
-    add_menu(page, "Palette", "Palette", ["cover", "hot", "sunburst", "ink", "disco"], ["Cover", "Hot", "Sunburst", "Ink", "Disco"], "cover")
+    add_gradient_palette_menu(page)
     add_float(page, "Softness", "Softness", 0.0, 0.0, 1.0, True, True)
     add_float(page, "Bleed", "Bleed", 0.35, 0.0, 1.0, True, True)
     add_menu(page, "Reveal", "Reveal", ["tone", "left", "right", "center", "dissolve"], ["Tone", "Sweep Left", "Sweep Right", "From Center", "Dissolve"], "tone")
@@ -228,7 +208,8 @@ def build(library):
 
     add_text(block, "levels_shader", LEVELS_SHADER, -500, -150)
     add_text(block, "bleed_shader", BLEED_SHADER, -500, -450)
-    add_text(block, "map_shader", MAP_SHADER, -300, -150)
+    shader = MAP_SHADER.replace("@@PALETTE_GLSL@@", gradient_palette_glsl())
+    add_text(block, "map_shader", shader, -300, -150)
 
     source = add_top(block, inTOP, "in1", -700)
     # Last frame's range comes back through this loop. It is 1x1, like the levels pass.
@@ -277,6 +258,7 @@ def build(library):
     switch.inputConnectors[1].connect(node)
     switch.outputConnectors[0].connect(output)
 
-    add_text(block, "effect", EFFECT_SOURCE, -500, -300)
+    effect = EFFECT_SOURCE.replace("@@PALETTE_INDEX@@", repr(GRADIENT_PALETTE_INDEX))
+    add_text(block, "effect", effect, -500, -300)
     add_callbacks(block)
     return block

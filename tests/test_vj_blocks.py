@@ -1697,31 +1697,29 @@ def test_gradient_shader_uniforms_match_their_entries(gradient):
     assert_uniforms_match_shaders(gradient)
 
 
-def test_gradient_colors_match_the_reference_palette(gradient):
-    constants = re.findall(r'const vec3 ([A-Z]+) = vec3\(([\d., ]+)\) / 255\.0;', map_shader(gradient))
-    actual = {
-        name: ''.join('%02x' % int(float(c)) for c in channels.split(','))
-        for name, channels in constants
-    }
-    assert actual == REFERENCE_PALETTE
-
-
-def test_gradient_palettes_match_the_menu_and_start_on_black(gradient):
-    text = map_shader(gradient)
-    rows = re.findall(r'^\s+(BLACK(?:, [A-Z]+)+),?\s+// (\w+)$', text, re.M)
-    counts = [int(n) for n in re.search(r'int\[PALETTES\]\(([\d, ]+)\)', text).group(1).split(',')]
-    names = gradient.par.Palette.menuNames
-    assert [name for _, name in rows] == names
-    assert len(counts) == len(names)
-    expected = {
-        'cover': ['BLACK', 'BLUE', 'CYAN', 'WHITE'],
-        'hot': ['BLACK', 'RED', 'PINK', 'YELLOW'],
-        'sunburst': ['BLACK', 'BLUE', 'CYAN', 'YELLOW'],
-        'ink': ['BLACK', 'YELLOW', 'WHITE'],
-        'disco': ['BLACK', 'BLUE', 'RED', 'PINK', 'CYAN', 'YELLOW'],
-    }
-    for (row, name), count in zip(rows, counts):
-        assert row.split(', ')[:count] == expected[name]
+def test_gradient_palettes_match_shader_rows(gradient):
+    labels = [
+        'Viridis', 'Plasma', 'Inferno', 'Magma', 'Cividis', 'Turbo',
+        'Spectral', 'RdBu', 'PuOr', 'PiYG', 'YlGnBu', 'YlOrRd',
+    ]
+    shader = map_shader(gradient)
+    table = re.search(r'const vec3 STOPS.*?\(\n(.*?)\n\);', shader, re.S).group(1)
+    rows = [
+        [
+            ''.join('%02x' % int(float(channel)) for channel in rgb.split(','))
+            for rgb in re.findall(r'vec3\(([\d., ]+)\) / 255\.0', row)
+        ]
+        for row in table.splitlines()
+    ]
+    assert gradient.par.Palette.menuNames == [label.lower() for label in labels]
+    assert gradient.par.Palette.menuLabels == labels
+    assert gradient.par.Palette.default == 'viridis'
+    assert f'const int PALETTES = {len(labels)};' in shader
+    assert 'const int STOP_COUNT = 5;' in shader
+    assert len(rows) == len(labels)
+    assert all(len(set(row)) == len(row) == 5 for row in rows)
+    assert rows[0] == ['440154', '3b528b', '21918c', '5ec962', 'fde725']
+    assert rows[-1] == ['bd0026', 'f03b20', 'fd8d3c', 'fecc5c', 'ffffb2']
 
 
 def test_gradient_lands_on_the_very_first_frame(world, gradient):
@@ -1763,7 +1761,7 @@ def test_gradient_holds_while_pressed_then_wipes_back(world, gradient):
 
 
 def test_gradient_controls_reach_the_shader(world, gradient):
-    gradient.par.Palette = 'disco'
+    gradient.par.Palette = 'ylorrd'
     gradient.par.Softness = 0.4
     gradient.par.Shift = 0.75
     gradient.par.Autolevels = 0.25
@@ -1772,7 +1770,7 @@ def test_gradient_controls_reach_the_shader(world, gradient):
     gradient.par.Reveal = 'center'
     gradient.par.Trigger = 1.0
     world.tick(gradient)
-    assert tone_map(gradient) == (4.0, 0.4, 0.25, 1.0)
+    assert tone_map(gradient) == (11.0, 0.4, 0.25, 1.0)
     assert uniforms(gradient, 'map', 1) == (0.25, 0.5, 0.0, 3.0)
     assert uniforms(gradient, 'bleed_v', 0)[:2] == (0.0, 0.0)
 
@@ -1945,8 +1943,8 @@ def test_flow_palettes_match_gradient_map(flow, gradient):
     flow_text = flow.op('map_shader').text
     assert re.search(pattern, flow_text, re.S).group(0) == re.search(pattern, map_shader(gradient), re.S).group(0)
     assert flow.par.Palette.menuNames == gradient.par.Palette.menuNames
-    for line in re.findall(r'^const vec3 [A-Z]+ = .*$', map_shader(gradient), re.M):
-        assert line in flow_text
+    assert flow.par.Palette.menuLabels == gradient.par.Palette.menuLabels
+    assert flow.par.Palette.default == gradient.par.Palette.default
 
 
 def test_flow_default_attack_swells_in(world, flow):
@@ -2042,7 +2040,7 @@ def test_flow_levels_measure_outright_on_a_press_then_ease(world, flow):
 
 def test_flow_controls_reach_the_shader(world, flow):
     flow.par.Attack = 0.0
-    flow.par.Palette = 'disco'
+    flow.par.Palette = 'ylorrd'
     flow.par.Rings = 1.0
     flow.par.Reach = 0.5
     flow.par.Softness = 0.2
@@ -2052,7 +2050,7 @@ def test_flow_controls_reach_the_shader(world, flow):
     flow.par.Trigger = 1.0
     world.tick(flow)
     rings = flow_rings(flow)
-    assert (rings[0], rings[1], rings[3]) == (4.0, 16.0, 0.2)
+    assert (rings[0], rings[1], rings[3]) == (11.0, 16.0, 0.2)
     assert flow_reach(flow) == pytest.approx((0.25, 0.25, 1.0, 0.5))
     assert uniforms(flow, 'map', 2)[0] == 0.7
     assert uniforms(flow, 'mask', 0)[0] == 0.7

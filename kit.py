@@ -5,6 +5,27 @@
 
 LIBRARY_NAME = "vj_block_library"
 
+# Five 8-bit RGB stops per palette, in menu order. The Matplotlib maps are sampled
+# at quarter intervals. ColorBrewer maps use its published five-class colors, with
+# the two sequential maps ordered from dark to light.
+# https://matplotlib.org/stable/gallery/color/colormap_reference.html
+# https://colorbrewer2.org/export/colorbrewer.json
+GRADIENT_PALETTES = {
+    "Viridis":   "440154 3b528b 21918c 5ec962 fde725",
+    "Plasma":    "0d0887 7e03a8 cc4778 f89540 f0f921",
+    "Inferno":   "000004 57106e bc3754 f98e09 fcffa4",
+    "Magma":     "000004 51127c b73779 fc8961 fcfdbf",
+    "Cividis":   "00224e 434e6c 7d7c78 bcae6c fee838",
+    "Turbo":     "30123b 28bceb a4fc3c fb7e21 7a0403",
+    "Spectral":  "d7191c fdae61 ffffbf abdda4 2b83ba",
+    "RdBu":      "ca0020 f4a582 f7f7f7 92c5de 0571b0",
+    "PuOr":      "e66101 fdb863 f7f7f7 b2abd2 5e3c99",
+    "PiYG":      "d01c8b f1b6da f7f7f7 b8e186 4dac26",
+    "YlGnBu":    "253494 2c7fb8 41b6c4 a1dab4 ffffcc",
+    "YlOrRd":    "bd0026 f03b20 fd8d3c fecc5c ffffb2",
+}
+GRADIENT_PALETTE_INDEX = {label.lower(): index for index, label in enumerate(GRADIENT_PALETTES)}
+
 TICK_SOURCE = r'''
 def onFrameStart(*args, **kwargs):
     op("engine").module.tick()
@@ -46,6 +67,27 @@ def add_menu(page, name, label, names, labels, default):
     par.default = default
     par.val = default
     return par
+
+
+def add_gradient_palette_menu(page):
+    names = list(GRADIENT_PALETTE_INDEX)
+    add_menu(page, "Palette", "Palette", names, list(GRADIENT_PALETTES), names[0])
+
+
+def gradient_palette_glsl():
+    rows = []
+    for colors in GRADIENT_PALETTES.values():
+        stops = []
+        for color in colors.split():
+            channels = ", ".join(f"{channel}.0" for channel in bytes.fromhex(color))
+            stops.append(f"vec3({channels}) / 255.0")
+        rows.append("    " + ", ".join(stops))
+    return (
+        "const int STOP_COUNT = 5;\n"
+        f"const int PALETTES = {len(rows)};\n"
+        "const vec3 STOPS[PALETTES * STOP_COUNT] = vec3[PALETTES * STOP_COUNT](\n"
+        + ",\n".join(rows) + "\n);"
+    )
 
 
 def add_control_page(block, defaults):

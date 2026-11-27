@@ -1,4 +1,4 @@
-# Gradient Flow: brand-color rings radiate from every shape's edge and flow through the palette
+# Gradient Flow: palette-colored rings radiate from every shape's edge and flow through the palette
 
 # Measures the frame's tonal range into one pixel, eased over time so cuts don't make the contours jump.
 # Input 0 is the picture, input 1 is last frame's result through the feedback loop.
@@ -128,32 +128,12 @@ const float EDGE_MIN = 0.03;   // band edge width at Softness 0, before antialia
 const float MAX_DIST = 4.0;    // stands in for "no edge anywhere"
 const float REACH_EDGE = 0.3;  // the aura's outer edge fades over this share of its reach
 
-// Exact brand values, as 8-bit channels.
-const vec3 BLACK = vec3(0.0, 0.0, 0.0) / 255.0;
-const vec3 BLUE = vec3(37.0, 115.0, 255.0) / 255.0;
-const vec3 PINK = vec3(255.0, 141.0, 255.0) / 255.0;
-const vec3 YELLOW = vec3(243.0, 221.0, 62.0) / 255.0;
-const vec3 RED = vec3(255.0, 66.0, 77.0) / 255.0;
-const vec3 CYAN = vec3(68.0, 248.0, 255.0) / 255.0;
-const vec3 WHITE = vec3(255.0, 255.0, 255.0) / 255.0;
-
-const int MAX_STOPS = 6;
-const int PALETTES = 5;
-const int COUNTS[PALETTES] = int[PALETTES](4, 4, 4, 3, 6);
-// One row per palette. The rings cycle through a row and wrap back to its start.
-const vec3 STOPS[PALETTES * MAX_STOPS] = vec3[PALETTES * MAX_STOPS](
-    BLACK, BLUE, CYAN, WHITE, WHITE, WHITE,    // cover
-    BLACK, RED, PINK, YELLOW, YELLOW, YELLOW,  // hot
-    BLACK, BLUE, CYAN, YELLOW, YELLOW, YELLOW, // sunburst
-    BLACK, YELLOW, WHITE, WHITE, WHITE, WHITE, // ink
-    BLACK, BLUE, RED, PINK, CYAN, YELLOW       // disco
-);
+@@PALETTE_GLSL@@
 
 // Wraps around the row. Index runs from -1 to count, and % is undefined for negatives in GLSL.
 vec3 stopColor(int palette, int index)
 {
-    int count = COUNTS[palette];
-    return STOPS[palette * MAX_STOPS + (index + count) % count];
+    return STOPS[palette * STOP_COUNT + (index + STOP_COUNT) % STOP_COUNT];
 }
 
 void main()
@@ -171,7 +151,7 @@ void main()
     float field = inside ? gap : -gap;  // wall heights, positive inside shapes
 
     int palette = clamp(int(uFlow.x + 0.5), 0, PALETTES - 1);
-    float count = float(COUNTS[palette]);
+    float count = float(STOP_COUNT);
     float ring = field * uFlow.y + uFlow.z;
     float position = fract(ring) * count - 0.5;
     float band = floor(position);
@@ -189,7 +169,7 @@ void main()
 '''
 
 EFFECT_SOURCE = r'''
-PALETTES = {"cover": 0.0, "hot": 1.0, "sunburst": 2.0, "ink": 3.0, "disco": 4.0}
+PALETTES = @@PALETTE_INDEX@@
 MAX_SPEED = 1.5   # palette cycles per second with Flow at either end
 MAX_REACH = 0.5   # wall heights the aura spreads past an edge at full Reach
 EASE = 0.12       # share of the way the tonal range moves toward each new measurement per frame
@@ -249,7 +229,7 @@ def apply(block, env):
     strength = min(1.0, level / 0.15)
     strength = strength * strength * (3.0 - 2.0 * strength)
     rings = 1.0 + 15.0 * _clamped(block.par.Rings)
-    palette = PALETTES[block.par.Palette.eval()]
+    palette = PALETTES.get(block.par.Palette.eval(), 0)
     _write(node, 0, palette, rings, _phase, _clamped(block.par.Softness))
     _write(node, 1, reach, _clamped(block.par.Inside), strength, _clamped(block.par.Mix))
     _write(node, 2, threshold)
@@ -275,7 +255,7 @@ def build(library):
     # A short attack and a long release, so the aura swells and recedes instead of snapping.
     add_control_page(block, {"mode": "gate", "attack": 0.08, "hold": 0.25, "release": 0.6, "curve": 1.5, "velocitydepth": 0.7})
     page = block.appendCustomPage("Gradient Flow")
-    add_menu(page, "Palette", "Palette", ["cover", "hot", "sunburst", "ink", "disco"], ["Cover", "Hot", "Sunburst", "Ink", "Disco"], "cover")
+    add_gradient_palette_menu(page)
     add_float(page, "Rings", "Ring Density", 0.33, 0.0, 1.0, True, True)
     add_float(page, "Reach", "Reach", 0.6, 0.0, 1.0, True, True)
     add_float(page, "Flow", "Flow (in / out)", 0.65, 0.0, 1.0, True, True)
@@ -290,7 +270,8 @@ def build(library):
     add_text(block, "mask_shader", MASK_SHADER, -900, -150)
     add_text(block, "edge_shader", EDGE_SHADER, -700, -150)
     add_text(block, "jump_shader", JUMP_SHADER, -500, -150)
-    add_text(block, "map_shader", MAP_SHADER, -300, -150)
+    shader = MAP_SHADER.replace("@@PALETTE_GLSL@@", gradient_palette_glsl())
+    add_text(block, "map_shader", shader, -300, -150)
 
     source = add_top(block, inTOP, "in1", -1300)
 
@@ -346,6 +327,7 @@ def build(library):
     switch.inputConnectors[1].connect(node)
     switch.outputConnectors[0].connect(output)
 
-    add_text(block, "effect", EFFECT_SOURCE, -500, -300)
+    effect = EFFECT_SOURCE.replace("@@PALETTE_INDEX@@", repr(GRADIENT_PALETTE_INDEX))
+    add_text(block, "effect", effect, -500, -300)
     add_callbacks(block)
     return block

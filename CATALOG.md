@@ -14,8 +14,8 @@ For release notes, record the TouchDesigner build and the effects tested in it.
 | [Fault Plates](blocks/fault_plates.py) | Pixel-level | approved |
 | [Glitch Smear](blocks/glitch_smear.py) | Feedback loop, block-matching motion | new |
 | [Gong Ring](blocks/gong_ring.py) | Pixel-level | approved |
-| [Gradient Flow](blocks/gradient_flow.py) | Pixel-level | approved |
-| [Gradient Map](blocks/gradient_map.py) | Pixel-level | approved |
+| [Gradient Flow](blocks/gradient_flow.py) | Pixel-level, 12 palettes with Viridis as the default | approved |
+| [Gradient Map](blocks/gradient_map.py) | Pixel-level, 12 palettes with Viridis as the default | approved |
 | [Halftone Hit](blocks/halftone_hit.py) | Pixel-level | approved |
 | [Kaleido Burst](blocks/kaleido_burst.py) | Pixel-level | approved |
 | [Ken Burns](blocks/ken_burns.py) | Pixel-level, photo from a dragged-in TOP | approved |
