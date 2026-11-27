@@ -80,7 +80,7 @@ const float BAYER[16] = float[16](0.0, 8.0, 2.0, 10.0, 12.0, 4.0, 14.0, 6.0, 3.0
 
 vec3 stopColor(int palette, int index)
 {
-    return STOPS[palette * STOP_COUNT + clamp(index, 0, STOP_COUNT - 1)];
+    return paletteStop(palette, clamp(index, 0, STOP_COUNT - 1));
 }
 
 void main()
@@ -198,7 +198,7 @@ def build(library):
     # Release is how long the bands take to recede through the tones.
     add_control_page(block, {"mode": "gate", "attack": 0.0, "hold": 0.25, "release": 0.15, "curve": 1.0, "velocitydepth": 0.6})
     page = block.appendCustomPage("Gradient Map")
-    add_gradient_palette_menu(page)
+    add_palette_menu(page)
     add_float(page, "Softness", "Softness", 0.0, 0.0, 1.0, True, True)
     add_float(page, "Bleed", "Bleed", 0.35, 0.0, 1.0, True, True)
     add_menu(page, "Reveal", "Reveal", ["tone", "left", "right", "center", "dissolve"], ["Tone", "Sweep Left", "Sweep Right", "From Center", "Dissolve"], "tone")
@@ -208,7 +208,7 @@ def build(library):
 
     add_text(block, "levels_shader", LEVELS_SHADER, -500, -150)
     add_text(block, "bleed_shader", BLEED_SHADER, -500, -450)
-    shader = MAP_SHADER.replace("@@PALETTE_GLSL@@", gradient_palette_glsl())
+    shader = palette_shader(MAP_SHADER)
     add_text(block, "map_shader", shader, -300, -150)
 
     source = add_top(block, inTOP, "in1", -700)
@@ -258,7 +258,7 @@ def build(library):
     switch.inputConnectors[1].connect(node)
     switch.outputConnectors[0].connect(output)
 
-    effect = EFFECT_SOURCE.replace("@@PALETTE_INDEX@@", repr(GRADIENT_PALETTE_INDEX))
+    effect = palette_effect(EFFECT_SOURCE, PALETTE_INDEX=PALETTE_INDEX)
     add_text(block, "effect", effect, -500, -300)
     add_callbacks(block)
     return block

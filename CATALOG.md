@@ -4,6 +4,14 @@ The first 32 effects were imported from the show project. The last column record
 in the original show catalog, or `new` for effects written here. Every effect still needs a smoke test from a standalone build.
 For release notes, record the TouchDesigner build and the effects tested in it.
 
+Seventeen blocks offer the shared palettes from [palettes.py](palettes.py).
+Gradient Flow and Gradient Map default to Viridis. The other blocks keep
+their original looks on load, with the shared palettes available in their
+color controls. Ring Pop's **Color Palette** works with any **Palette** mode.
+Star Glint and Twinkle Cannon use **Rainbow Palette** for their colored tips.
+In Sunburst, **Match Ray Palette** colors the sun with the brightest stop of
+the selected shared ray palette.
+
 | Effect | Architecture | Show catalog |
 | --- | --- | --- |
 | [Block Shuffle](blocks/block_shuffle.py) | Pixel-level | approved |

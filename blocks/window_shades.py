@@ -293,22 +293,7 @@ SOFT_BOUNCE = 0.3
 EXIT_WINDOW = 0.4       # share of the exit each window takes to clear
 FRAME_LEAVE = 0.6       # share of the exit before the frames start to thin
 
-BLUE = (0.1451, 0.4510, 1.0)
-PINK = (1.0, 0.5529, 1.0)
-YELLOW = (0.9529, 0.8667, 0.2431)
-RED = (1.0, 0.2588, 0.3020)
-CYAN = (0.2667, 0.9725, 1.0)
-WHITE = (1.0, 1.0, 1.0)
-BLACK = (0.0, 0.0, 0.0)
-COLOR_SETS = {
-    "full": [BLUE, PINK, YELLOW, RED, CYAN],
-    "hot": [PINK, RED, YELLOW],
-    "cool": [BLUE, CYAN, WHITE],
-    "primary": [BLUE, YELLOW, RED],
-    "pinkyellow": [PINK, YELLOW],
-    "bluewhite": [BLUE, WHITE],
-    "ink": [BLACK, WHITE],
-}
+COLOR_SETS = @@COLOR_SETS@@
 PATTERNS = ["sweepright", "sweepleft", "centerout", "edgesin", "diagonal", "checker", "rows", "rain", "spiral", "random"]
 DIRECTIONS = ["down", "up", "right", "left", "curtains", "alternate"]
 EXITS = ["drop", "rollup", "cut"]
@@ -434,6 +419,15 @@ def apply(block, env):
         _write(shades, 5 + index, red, green, blue, 0.0)
 '''
 
+PRESETS = {
+    "full": ("Full Brand", BRAND_COLORS),
+    "hot": ("Hot", ("pink", "red", "yellow")),
+    "cool": ("Cool", ("blue", "cyan", "white")),
+    "primary": ("Primary", ("blue", "yellow", "red")),
+    "pinkyellow": ("Pink + Yellow", ("pink", "yellow")),
+    "bluewhite": ("Blue + White", ("blue", "white")),
+    "ink": ("Ink", ("black", "white")),
+}
 UNIFORMS = ["uGrid", "uTime", "uShape", "uLook", "uMore", "uColor0", "uColor1", "uColor2", "uColor3", "uColor4"]
 
 
@@ -460,13 +454,9 @@ def build(library):
         "down",
     )
     add_menu(page, "Exit", "Exit", ["drop", "rollup", "cut"], ["Drop Through", "Roll Up", "Hard Cut"], "drop")
-    add_menu(
-        page,
-        "Colorset",
-        "Color Set",
-        ["full", "hot", "cool", "primary", "pinkyellow", "bluewhite", "ink"],
-        ["Full Brand", "Hot", "Cool", "Primary", "Pink + Yellow", "Blue + White", "Ink"],
-        "full",
+    add_palette_menu(
+        page, "Colorset", "Color Set",
+        presets={name: label for name, (label, _) in PRESETS.items()}, default="full",
     )
     add_menu(
         page,
@@ -510,6 +500,8 @@ def build(library):
     switch.inputConnectors[1].connect(shades)
     switch.outputConnectors[0].connect(output)
 
-    add_text(block, "effect", EFFECT_SOURCE, -500, -300)
+    colors = {name: tuple(SWATCH_RGB[color] for color in row) for name, (_, row) in PRESETS.items()}
+    effect = palette_effect(EFFECT_SOURCE, COLOR_SETS={**colors, **PALETTE_RGB})
+    add_text(block, "effect", effect, -500, -300)
     add_callbacks(block)
     return block

@@ -237,15 +237,9 @@ import random
 
 SHAPES = ["circle", "square", "diamond", "triangle", "hexagon", "star", "heart", "cross", "bar"]
 EXITS = ["fade", "punch", "halftone", "retreat", "wipeoff", "cut"]
-BLUE = (0.1451, 0.4510, 1.0)
-PINK = (1.0, 0.5529, 1.0)
-YELLOW = (0.9529, 0.8667, 0.2431)
-RED = (1.0, 0.2588, 0.3020)
-CYAN = (0.2667, 0.9725, 1.0)
-WHITE = (1.0, 1.0, 1.0)
-BLACK = (0.0, 0.0, 0.0)
-COLORS = {"blue": BLUE, "pink": PINK, "yellow": YELLOW, "red": RED, "cyan": CYAN, "white": WHITE, "black": BLACK}
-CYCLE = ["blue", "pink", "yellow", "red", "cyan"]
+COLORS = @@SWATCHES@@
+PALETTES = @@PALETTES@@
+CYCLE = @@CYCLE@@
 POINTS_MIN = 4          # star points at Points 0
 POINTS_RANGE = 8
 SOFT_MAX = 0.5          # wall heights of edge softness at full Softness
@@ -328,13 +322,16 @@ def _pick_color(block):
     # Cycle never repeats the last color, or the color still clearing underneath.
     global _last_color
     choice = block.par.Color.eval()
-    if choice == "cycle":
+    if choice in COLORS:
+        color = COLORS[choice]
+    else:
+        stops = PALETTES.get(choice, tuple(COLORS[name] for name in CYCLE))
         avoid = {_last_color}
         if _under is not None:
-            avoid.add(_under["colorname"])
-        choice = _rng.choice([name for name in CYCLE if name not in avoid])
-    _last_color = choice
-    return choice
+            avoid.add(_under["color"])
+        color = _rng.choice([stop for stop in stops if stop not in avoid])
+    _last_color = color
+    return color
 
 
 def _pick_shape(block):
@@ -360,12 +357,11 @@ def points_for(block):
 
 
 def _roll(block, velocity):
-    colorname = _pick_color(block)
+    color = _pick_color(block)
     return {
         "shape": _pick_shape(block),
         "origin": _origin(block),
-        "colorname": colorname,
-        "color": COLORS[colorname],
+        "color": color,
         "points": points_for(block),
         "cover": SOFT_COVER + (1.0 - SOFT_COVER) * velocity,
         "g": 0.0,
@@ -480,13 +476,10 @@ def build(library):
         "star",
     )
     add_float(page, "Points", "Star Points", 0.125, 0.0, 1.0, True, True)
-    add_menu(
-        page,
-        "Color",
-        "Color",
-        ["cycle", "blue", "pink", "yellow", "red", "cyan", "white", "black"],
-        ["Cycle (random each press)", "Blue", "Pink", "Yellow", "Red", "Cyan", "White", "Black"],
-        "cycle",
+    add_palette_menu(
+        page, "Color", "Color",
+        presets={"cycle": "Cycle (random each press)", **{name: name.title() for name in SWATCH_RGB}},
+        default="cycle",
     )
     add_menu(
         page,
@@ -532,6 +525,7 @@ def build(library):
     switch.inputConnectors[1].connect(node)
     switch.outputConnectors[0].connect(output)
 
-    add_text(block, "effect", EFFECT_SOURCE, -500, -300)
+    effect = palette_effect(EFFECT_SOURCE, SWATCHES=SWATCH_RGB, PALETTES=PALETTE_RGB, CYCLE=BRAND_COLORS)
+    add_text(block, "effect", effect, -500, -300)
     add_callbacks(block)
     return block

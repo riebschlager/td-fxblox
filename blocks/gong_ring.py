@@ -13,6 +13,7 @@ uniform vec4 uBand2;
 uniform vec4 uBand3;
 uniform vec4 uLook;    // dents, chroma, glint amount, glint threshold
 uniform vec4 uMisc;    // mix, node line width in pixels, sheen, node line opacity
+uniform vec4 uGlintColor;
 
 layout(location = 0) out vec4 fragColor;
 
@@ -27,7 +28,6 @@ const float SHINE[6] = float[6](0.45, 0.45, 1.0, 1.0, 0.8, 0.8);
 const float IMPACT = 0.45;       // first-frames bulge, in wall heights
 const float DENT_WARP = 0.02;    // how far hammer marks bend the rings, in wall heights
 const vec2 LIGHT = vec2(0.53, 0.848);
-const vec3 BRAND_YELLOW = vec3(0.953, 0.867, 0.243);
 
 vec2 fold(vec2 uv)
 {
@@ -99,7 +99,7 @@ void main()
     if (uLook.z > 0.0) {
         float lit = shine + dents * uLook.x * 0.15;
         float edge = max(fwidth(lit), 0.001);
-        color = mix(color, BRAND_YELLOW, smoothstep(uLook.w, uLook.w + edge, lit));
+        color = mix(color, uGlintColor.rgb, smoothstep(uLook.w, uLook.w + edge, lit));
     }
     if (uMisc.y > 0.0 && uMisc.w > 0.0) {
         float across = abs(height) / max(fwidth(height), 0.00001);
@@ -115,11 +115,13 @@ void main()
 EFFECT_SOURCE = r'''
 import math
 
+HIGHLIGHTS = @@HIGHLIGHTS@@
 STRIKE_COUNT = 4
 EMPTY_STRIKE = (0.5, 0.5, 0.0, 0.0)
 EMPTY_BAND = (0.0, 0.0, 0.0, 0.0)
 LOOK_ENTRY = STRIKE_COUNT * 2
 MISC_ENTRY = LOOK_ENTRY + 1
+COLOR_ENTRY = MISC_ENTRY + 1
 
 SWEEP_SECONDS = 0.45    # how long the rings take to reach their full spread
 FIRST_REACH = 0.3       # share of the spread already covered on the firing frame
@@ -182,6 +184,7 @@ def _write_rest(node):
         _write(node, STRIKE_COUNT + index, *EMPTY_BAND)
     _write(node, LOOK_ENTRY, 0.0, 0.0, 0.0, 0.0)
     _write(node, MISC_ENTRY, 0.0, 0.0, 0.0)
+    _write(node, COLOR_ENTRY, 0.0, 0.0, 0.0)
 
 
 def _bands(age, progress, velocity, bloom):
@@ -256,6 +259,7 @@ def apply(block, env):
         glint,
         1.25 - 0.8 * glint,
     )
+    _write(ring, COLOR_ENTRY, *HIGHLIGHTS[block.par.Palette.eval()])
     nodelines = _clamped(block.par.Nodelines)
     _write(
         ring,
@@ -270,7 +274,7 @@ def apply(block, env):
 UNIFORMS = [
     "uStrike0", "uStrike1", "uStrike2", "uStrike3",
     "uBand0", "uBand1", "uBand2", "uBand3",
-    "uLook", "uMisc",
+    "uLook", "uMisc", "uGlintColor",
 ]
 
 
@@ -292,6 +296,7 @@ def build(library):
     add_float(page, "Sheen", "Sheen", 0.6, 0.0, 1.0, True, True)
     add_float(page, "Nodelines", "Node Lines", 0.0, 0.0, 1.0, True, True)
     add_float(page, "Damp", "Damp", 0.0, 0.0, 1.0, True, True)
+    add_palette_menu(page, presets={"brand": "Brand"}, default="brand")
     add_float(page, "Mix", "Mix", 1.0, 0.0, 1.0, True, True)
 
     add_text(block, "ring_shader", SHADER, -300, -150)
@@ -316,6 +321,7 @@ def build(library):
     switch.inputConnectors[1].connect(ring)
     switch.outputConnectors[0].connect(output)
 
-    add_text(block, "effect", EFFECT_SOURCE, -500, -300)
+    effect = palette_effect(EFFECT_SOURCE, HIGHLIGHTS={"brand": SWATCH_RGB["yellow"], **PALETTE_HIGHLIGHTS})
+    add_text(block, "effect", effect, -500, -300)
     add_callbacks(block)
     return block

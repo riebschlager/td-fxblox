@@ -302,15 +302,8 @@ SEED_RANGE = 100.0
 FEWEST_SHOCKS = 0.25  # a quarter cycle closes the plates with no aftershock
 SHOCK_RANGE = 3.75
 HOT_ORDER = ("pink", "red", "yellow")
-COLORS = {
-    "pink": (1.0, 0.5529, 1.0),
-    "red": (1.0, 0.2588, 0.3020),
-    "yellow": (0.9529, 0.8667, 0.2431),
-    "blue": (0.1451, 0.4510, 1.0),
-    "cyan": (0.2667, 0.9725, 1.0),
-    "white": (1.0, 1.0, 1.0),
-    "black": (0.0, 0.0, 0.0),
-}
+COLORS = @@SWATCHES@@
+PALETTES = @@PALETTES@@
 
 _rng = random.Random()
 _hit = None
@@ -347,7 +340,12 @@ def _roll(block, velocity):
     # The layout is fixed for the life of a hit, because changing it mid-air would pop.
     global _hits
     choice = block.par.Gapcolor.eval()
-    name = HOT_ORDER[_hits % len(HOT_ORDER)] if choice == "hot" else choice
+    if choice in PALETTES:
+        stops = PALETTES[choice]
+        color = stops[_hits % len(stops)]
+    else:
+        name = HOT_ORDER[_hits % len(HOT_ORDER)] if choice == "hot" else choice
+        color = COLORS[name]
     rows = ROWS_FEWEST + ROWS_RANGE * _clamped(block.par.Chunks)
     reach = (REACH_MIN + REACH_RANGE * _clamped(block.par.Reach)) * (SOFT_REACH + (1.0 - SOFT_REACH) * velocity)
     origin_x = _clamped(block.par.Origin) + _rng.uniform(-DRIFT_X, DRIFT_X)
@@ -357,7 +355,7 @@ def _roll(block, velocity):
         "reach": reach,
         "origin": (max(0.0, min(1.0, origin_x)), 0.5 + _rng.uniform(-DRIFT_Y, DRIFT_Y)),
         "heading": _rng.choice((-1.0, 1.0)),
-        "color": COLORS[name],
+        "color": color,
         "velocity": velocity,
     }
     _hits += 1
@@ -427,13 +425,10 @@ def build(library):
     add_float(page, "Tilt", "Tilt", 0.4, 0.0, 1.0, True, True)
     add_float(page, "Aftershock", "Aftershock", 0.35, 0.0, 1.0, True, True)
     add_float(page, "Ink", "Ink", 0.5, 0.0, 1.0, True, True)
-    add_menu(
-        page,
-        "Gapcolor",
-        "Gap Color",
-        ["hot", "pink", "red", "yellow", "blue", "cyan", "white", "black"],
-        ["Hot (cycles)", "Pink", "Red", "Yellow", "Blue", "Cyan", "White", "Black"],
-        "hot",
+    add_palette_menu(
+        page, "Gapcolor", "Gap Color",
+        presets={"hot": "Hot (cycles)", **{name: name.title() for name in ("pink", "red", "yellow", "blue", "cyan", "white", "black")}},
+        default="hot",
     )
     # Resolution the plate layout is worked out at. The picture is always sampled at full size.
     add_menu(page, "Detail", "Detail", ["useinput", "half", "quarter", "eighth"], ["Full", "Half", "Quarter", "Eighth"], "quarter")
@@ -462,6 +457,7 @@ def build(library):
     switch.inputConnectors[1].connect(plates)
     switch.outputConnectors[0].connect(output)
 
-    add_text(block, "effect", EFFECT_SOURCE, -500, -300)
+    effect = palette_effect(EFFECT_SOURCE, SWATCHES=SWATCH_RGB, PALETTES=PALETTE_RGB)
+    add_text(block, "effect", effect, -500, -300)
     add_callbacks(block)
     return block

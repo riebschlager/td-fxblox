@@ -82,13 +82,15 @@ BOLT_SHADER = (
 
 SHADER = r'''
 uniform vec4 uLook;     // wall flip, dark, video zoom, mix
-uniform vec4 uInk;      // yellow band, key line, outer ink
+uniform vec4 uInk;      // accent band, key line, outer ink, palette (0 is brand)
 uniform vec4 uSlip;     // yellow plate offset in uv
 
 layout(location = 0) out vec4 fragColor;
 
 const vec3 BLACK = vec3(0.0);
-const vec3 YELLOW = vec3(0.9529, 0.8667, 0.2431);
+const vec3 YELLOW = @@YELLOW@@;
+@@PALETTE_GLSL@@
+@@PALETTE_HIGHLIGHTS@@
 const int NEWEST = 0;
 const int OLDEST = 2;
 
@@ -101,6 +103,8 @@ void main()
 {
     vec4 source = texture(sTD2DInputs[0], vUV.st);
     vec3 color = BLACK;
+    int palette = int(uInk.w) - 1;
+    vec3 accent = palette < 0 ? YELLOW : paletteHighlight(palette);
 
     if (uLook.y < 0.5) {
         vec3 field = texture(sTD2DInputs[1], vUV.st).rgb;
@@ -109,7 +113,7 @@ void main()
         if (uLook.x > 0.0) {
             // The flip: yellow wall, bolts printed solid black.
             float shape = min(field.r, min(field.g, field.b));
-            color = mix(YELLOW * uLook.x, BLACK, cover(shape, soft));
+            color = mix(accent * uLook.x, BLACK, cover(shape, soft));
         } else {
             vec3 plate = field;
             if (uSlip.x != 0.0 || uSlip.y != 0.0) {
@@ -124,7 +128,7 @@ void main()
                 }
                 // Outer ink only shows where this bolt crosses another one.
                 color = mix(color, BLACK, cover(d - uInk.z, soft));
-                color = mix(color, YELLOW, cover(yellow, soft));
+                color = mix(color, accent, cover(yellow, soft));
                 color = mix(color, BLACK, cover(d + uInk.x, soft));
                 float core = cover(d + uInk.x + uInk.y, soft);
                 if (core > 0.0) {
@@ -165,6 +169,7 @@ FORK_SWING = (0.2, 0.45)
 FORK_RETURN = (0.05, 0.2)
 FORK_MIN_RUN = 0.45     # a fork always heads for an edge at least this far away
 PAST_EDGE = 0.08
+PALETTE_INDEX = @@PALETTE_INDEX@@
 YELLOW_BAND = 0.03
 KEY_LINE = 0.012
 OUTER_INK = 0.016
@@ -360,7 +365,7 @@ def apply(block, env):
 
     _send(clap, [
         (flip, dark, 1.0 + ZOOM_RANGE * _clamped(block.par.Punch), _clamped(block.par.Mix)),
-        (YELLOW_BAND, KEY_LINE, OUTER_INK, 0.0),
+        (YELLOW_BAND, KEY_LINE, OUTER_INK, PALETTE_INDEX.get(block.par.Palette.eval(), -1) + 1),
         (slip[0], slip[1], 0.0, 0.0),
     ])
 '''
@@ -385,10 +390,12 @@ def build(library):
     add_float(page, "Flip", "Wall Flip", 1.0, 0.0, 1.0, True, True)
     add_float(page, "Storm", "Storm", 1.0, 0.0, 1.0, True, True)
     add_float(page, "Punch", "Video Punch-in", 0.5, 0.0, 1.0, True, True)
+    add_palette_menu(page, presets={"brand": "Brand"}, default="brand")
     add_float(page, "Mix", "Mix", 1.0, 0.0, 1.0, True, True)
 
     add_text(block, "bolt_shader", BOLT_SHADER, -500, -150)
-    add_text(block, "clap_shader", SHADER, -300, -150)
+    shader = palette_shader(SHADER, YELLOW=glsl_rgb(SWATCH_RGB8["yellow"]))
+    add_text(block, "clap_shader", shader, -300, -150)
 
     source = add_top(block, inTOP, "in1", -700)
 
@@ -420,6 +427,7 @@ def build(library):
     switch.inputConnectors[1].connect(clap)
     switch.outputConnectors[0].connect(output)
 
-    add_text(block, "effect", EFFECT_SOURCE, -500, -300)
+    effect = palette_effect(EFFECT_SOURCE, PALETTE_INDEX=PALETTE_INDEX)
+    add_text(block, "effect", effect, -500, -300)
     add_callbacks(block)
     return block

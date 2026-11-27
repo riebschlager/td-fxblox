@@ -66,7 +66,7 @@ LAYOUT_SHADER = (
 
 SHADER = r'''
 uniform vec4 uMotion;   // warp x, warp y, wave x, wave y
-uniform vec4 uCut;      // how far the cut-out has run
+uniform vec4 uCut;      // cut-out progress, palette (0 is brand)
 uniform vec4 uLook;     // seed, scatter, ink bias, mix
 
 layout(location = 0) out vec4 fragColor;
@@ -76,13 +76,8 @@ const float TAU = 6.2831853;
 const float MAX_ZOOM = 1.2;
 const float MAX_SHIFT = 0.3;
 const float BLACK_FLOOR = 0.02;     // below this average there is only sensor noise to ink
-const vec3 PALETTE[5] = vec3[5](
-    vec3(0.1451, 0.4510, 1.0),      // blue
-    vec3(1.0, 0.5529, 1.0),         // pink
-    vec3(0.9529, 0.8667, 0.2431),   // yellow
-    vec3(1.0, 0.2588, 0.3020),      // red
-    vec3(0.2667, 0.9725, 1.0)       // cyan
-);
+@@SWATCHES@@
+@@PALETTE_GLSL@@
 
 float hash(float n)
 {
@@ -130,7 +125,9 @@ void main()
         // Thresholding against the neighborhood means dark clips still draw. Black or
         // flat areas fall through to pure color, which is still color blocking.
         bool ink = local > BLACK_FLOOR && luma < local * (1.0 + uLook.z);
-        color = ink ? vec3(0.0) : PALETTE[int(cell.r + 0.5)];
+        int stop = int(cell.r + 0.5);
+        int palette = int(uCut.y) - 1;
+        color = ink ? vec3(0.0) : (palette < 0 ? PALETTE[stop] : paletteStop(palette, stop));
     }
 
     fragColor = TDOutputSwizzle(vec4(mix(source.rgb, color, uLook.w), source.a));
@@ -158,8 +155,8 @@ INK_LOW = -0.6
 INK_RANGE = 0.8
 SEED_RANGE = 100.0
 MAX_PAINT_STEPS = 400
-BLUE = 0
-COLOR_COUNT = 5
+PALETTE_INDEX = @@PALETTE_INDEX@@
+COLOR_COUNT = @@STOP_COUNT@@
 EMPTY = (0.0, 0.0, 0.0, 0.0)
 
 _rng = random.Random()
@@ -259,7 +256,7 @@ def _paint(rects):
     biggest = max(range(count), key=lambda i: _area(rects[i]))
     before = [_color_before(rect) for rect in rects]
     paint = [None] * count
-    paint[biggest] = BLUE
+    paint[biggest] = 0
     steps = [0]
 
     def taken(index):
@@ -367,7 +364,7 @@ def apply(block, env):
     settle = _settle(absTime.seconds - _hit["started"])
     _send(slam, [
         (_hit["warp_x"] * settle, _hit["warp_y"] * settle, float(_hit["wave_x"]), float(_hit["wave_y"])),
-        (shaped, 0.0, 0.0, 0.0),
+        (shaped, PALETTE_INDEX.get(block.par.Palette.eval(), -1) + 1, 0.0, 0.0),
         (
             _hit["seed"],
             _clamped(block.par.Scatter),
@@ -394,11 +391,13 @@ def build(library):
     add_float(page, "Spring", "Landing Spring", 0.6, 0.0, 1.0, True, True)
     add_float(page, "Ink", "Ink", 0.4, 0.0, 1.0, True, True)
     add_float(page, "Scatter", "Scatter", 0.0, 0.0, 1.0, True, True)
+    add_palette_menu(page, presets={"brand": "Brand"}, default="brand")
     add_float(page, "Mix", "Mix", 1.0, 0.0, 1.0, True, True)
 
     add_text(block, "field_shader", FIELD_SHADER, -500, -150)
     add_text(block, "layout_shader", LAYOUT_SHADER, -500, 300)
-    add_text(block, "slam_shader", SHADER, -300, -150)
+    shader = palette_shader(SHADER, SWATCHES=glsl_swatches("PALETTE", BRAND_COLORS))
+    add_text(block, "slam_shader", shader, -300, -150)
 
     source = add_top(block, inTOP, "in1", -700)
     field = add_top(block, glslTOP, "field", -500)
@@ -439,6 +438,7 @@ def build(library):
     switch.inputConnectors[1].connect(slam)
     switch.outputConnectors[0].connect(output)
 
-    add_text(block, "effect", EFFECT_SOURCE, -500, -300)
+    effect = palette_effect(EFFECT_SOURCE, PALETTE_INDEX=PALETTE_INDEX, STOP_COUNT=STOP_COUNT)
+    add_text(block, "effect", effect, -500, -300)
     add_callbacks(block)
     return block

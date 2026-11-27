@@ -5,19 +5,13 @@ uniform vec4 uGrid;     // columns, rows, bulb diameter (of a cell), cover (1 is
 uniform vec4 uPattern;  // pattern, step, period in cells, density
 uniform vec4 uAim;      // center x, center y, axis (1 is down), alternate
 uniform vec4 uStyle;    // ink, shadow distance (both of a cell), mix
-uniform vec4 uColor;    // single tone (-1 is candy), candy shift
+uniform vec4 uColor;    // single tone (-1 is candy), candy shift, palette (0 is brand)
 
 layout(location = 0) out vec4 fragColor;
 
 const vec3 BLACK = vec3(0.0);
-const vec3 INKS[6] = vec3[6](
-    vec3(0.9529, 0.8667, 0.2431),   // yellow
-    vec3(0.1451, 0.4510, 1.0),      // blue
-    vec3(1.0, 0.5529, 1.0),         // pink
-    vec3(1.0, 0.2588, 0.3020),      // red
-    vec3(0.2667, 0.9725, 1.0),      // cyan
-    vec3(1.0)                       // white
-);
+@@SWATCHES@@
+@@PALETTE_GLSL@@
 const float MAX_INK = 0.6;          // of a bulb's radius, so a bulb always keeps its color
 const float MIN_SPARKLE = 0.1;      // share of bulbs lit at the bottom of the Density knob
 const float SPARKLE_RANGE = 0.7;
@@ -110,15 +104,17 @@ void main()
     float shadow = bulbField(vUV.st - vec2(drop, -drop) / aspect, grid, aspect, cellSize, shadowCell);
 
     int tone = int(uColor.x + 0.5);
+    int palette = int(uColor.z) - 1;
     if (uColor.x < 0.0) {
         // One across is one tone, one down is two: touching bulbs never match.
-        tone = int(mod(cell.x + 2.0 * cell.y + uColor.y, 5.0));
+        tone = int(mod(cell.x + 2.0 * cell.y + uColor.y, float(STOP_COUNT)));
     }
 
     // One pixel of antialiasing keeps the edges hard without crawling on the LEDs.
     vec3 color = mix(source.rgb, BLACK, drop > 0.0 ? clamp(shadow / pixel + 0.5, 0.0, 1.0) : 0.0);
     color = mix(color, BLACK, clamp(inside / pixel + 0.5, 0.0, 1.0));
-    color = mix(color, INKS[tone], clamp((inside - ink) / pixel + 0.5, 0.0, 1.0));
+    vec3 bulbColor = palette < 0 ? INKS[tone] : paletteStop(palette, tone);
+    color = mix(color, bulbColor, clamp((inside - ink) / pixel + 0.5, 0.0, 1.0));
 
     fragColor = TDOutputSwizzle(vec4(mix(source.rgb, color, uStyle.z), source.a));
 }
@@ -128,8 +124,9 @@ EFFECT_SOURCE = r'''
 import math
 
 PATTERNS = ["chase", "checker", "rings", "diamonds", "sweep", "wave", "sparkle"]
-TONES = {"yellow": 0, "blue": 1, "pink": 2, "red": 3, "cyan": 4, "white": 5}
-BRAND_COLORS = 5        # the rotating palettes skip white
+TONES = @@TONES@@
+PALETTE_INDEX = @@PALETTE_INDEX@@
+BRAND_COLORS = len(TONES) - 1        # the rotating palettes skip white
 MAX_STEPS = 16.0        # pattern steps per second at the top of the Speed knob
 MIN_PERIOD = 2          # lit one bulb in this many at the top of the Density knob
 MAX_PERIOD = 8          # and at the bottom
@@ -184,10 +181,9 @@ def _pattern(block):
     return float(index)
 
 
-def _color(block):
-    palette = block.par.Palette.eval()
+def _color(palette):
     turn = (_presses - 1) % BRAND_COLORS
-    if palette == "candy":
+    if palette == "candy" or palette in PALETTE_INDEX:
         return -1.0, float(turn)
     if palette == "press":
         return float(turn), 0.0
@@ -231,7 +227,8 @@ def apply(block, env):
     period = round(MAX_PERIOD + (MIN_PERIOD - MAX_PERIOD) * density)
     columns = max(1, int(round(block.par.Columns.eval())))
     rows = max(1, int(round(block.par.Rows.eval())))
-    tone, shift = _color(block)
+    palette = block.par.Palette.eval()
+    tone, shift = _color(palette)
 
     _write(bulbs, 0, float(columns), float(rows), _diameter(block, env, now - _fired), max(0.0, min(1.0, env.level)))
     _write(bulbs, 1, _pattern(block), float(tick), float(period), density)
@@ -242,9 +239,10 @@ def apply(block, env):
         1.0 if block.par.Alternate.eval() == "on" else 0.0,
     )
     _write(bulbs, 3, _clamped(block.par.Ink) * INK_RANGE, _clamped(block.par.Shadow) * SHADOW_RANGE, _clamped(block.par.Mix))
-    _write(bulbs, 4, tone, shift)
+    _write(bulbs, 4, tone, shift, PALETTE_INDEX.get(palette, -1) + 1)
 '''
 
+BULB_COLORS = ("yellow", "blue", "pink", "red", "cyan", "white")
 UNIFORMS = ["uGrid", "uPattern", "uAim", "uStyle", "uColor"]
 
 
@@ -269,17 +267,18 @@ def build(library):
     add_menu(page, "Alternate", "Alternate Lines", ["off", "on"], ["Off", "On"], "off")
     add_float(page, "Centerx", "Center X", 0.5, 0.0, 1.0, True, True)
     add_float(page, "Centery", "Center Y", 0.5, 0.0, 1.0, True, True)
-    add_menu(
-        page, "Palette", "Palette",
-        ["yellow", "blue", "pink", "red", "cyan", "white", "candy", "press"],
-        ["Yellow", "Blue", "Pink", "Red", "Cyan", "White", "Candy", "New Color Every Press"],
-        "yellow",
+    add_palette_menu(
+        page, presets={
+            **{name: name.title() for name in BULB_COLORS},
+            "candy": "Candy", "press": "New Color Every Press",
+        }, default="yellow",
     )
     add_float(page, "Ink", "Ink Line", 0.5, 0.0, 1.0, True, True)
     add_float(page, "Shadow", "Hard Shadow", 0.4, 0.0, 1.0, True, True)
     add_float(page, "Mix", "Mix", 1.0, 0.0, 1.0, True, True)
 
-    add_text(block, "bulbs_shader", SHADER, -300, -150)
+    shader = palette_shader(SHADER, SWATCHES=glsl_swatches("INKS", BULB_COLORS))
+    add_text(block, "bulbs_shader", shader, -300, -150)
 
     source = add_top(block, inTOP, "in1", -500)
     bulbs = add_top(block, glslTOP, "bulbs", -300)
@@ -301,6 +300,10 @@ def build(library):
     switch.inputConnectors[1].connect(bulbs)
     switch.outputConnectors[0].connect(output)
 
-    add_text(block, "effect", EFFECT_SOURCE, -500, -300)
+    effect = palette_effect(
+        EFFECT_SOURCE, PALETTE_INDEX=PALETTE_INDEX,
+        TONES={name: index for index, name in enumerate(BULB_COLORS)},
+    )
+    add_text(block, "effect", effect, -500, -300)
     add_callbacks(block)
     return block

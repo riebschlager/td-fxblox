@@ -15,13 +15,14 @@ def _build(blocks=None, *, output=None, panic_chop="", panic_channel="", scene_t
         raise ValueError("Set both panic_chop and panic_channel to enable panic")
 
     output_dir = source / "dist" if output is None else Path(output).expanduser().resolve()
-    kit_path = source / "kit.py"
     kit = dict(
         globals(),
         ENGINE_SOURCE=(source / "engine.py").read_text(encoding="utf-8"),
         INTEGRATION={"PANIC_CHOP": panic_chop, "PANIC_CHANNEL": panic_channel, "SCENE_TAG": scene_tag},
     )
-    exec(compile(kit_path.read_bytes(), str(kit_path), "exec"), kit)
+    for filename in ("palettes.py", "kit.py"):
+        path = source / filename
+        exec(compile(path.read_bytes(), str(path), "exec"), kit)
 
     # Load every requested module before changing the project or writing files.
     builders = []

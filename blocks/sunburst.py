@@ -4,39 +4,20 @@ SHADER = r'''
 uniform vec4 uSun;     // center x, center y, disc radius, ink width (lengths in wall heights)
 uniform vec4 uRays;    // ray count (a multiple of the palette's size), phase in rays, width, screen
 uniform vec4 uShape;   // reach (1 is the farthest corner), shutter level, stagger, floor
-uniform vec4 uMisc;    // mix, ray palette, sun color, unused
+uniform vec4 uMisc;    // mix, original ray preset, sun color, shared palette (0 is original)
 
 layout(location = 0) out vec4 fragColor;
 
 const float PI = 3.14159265359;
 const vec3 LUMA = vec3(0.299, 0.587, 0.114);
 
-// Exact brand values, as 8-bit channels.
-const vec3 BLACK = vec3(0.0, 0.0, 0.0) / 255.0;
-const vec3 BLUE = vec3(37.0, 115.0, 255.0) / 255.0;
-const vec3 PINK = vec3(255.0, 141.0, 255.0) / 255.0;
-const vec3 YELLOW = vec3(243.0, 221.0, 62.0) / 255.0;
-const vec3 RED = vec3(255.0, 66.0, 77.0) / 255.0;
-const vec3 CYAN = vec3(68.0, 248.0, 255.0) / 255.0;
-const vec3 WHITE = vec3(255.0, 255.0, 255.0) / 255.0;
-
-// One row per ray palette, padded with its last color. Black is left out
-// because the rays print on black. Neighboring rays never share a color,
-// because the ray count is always a multiple of the row's length.
-const int MAX_STOPS = 5;
-const int PALETTES = 7;
-const int COUNTS[PALETTES] = int[PALETTES](3, 3, 4, 4, 5, 3, 2);
-const vec3 STOPS[PALETTES * MAX_STOPS] = vec3[PALETTES * MAX_STOPS](
-    YELLOW, BLUE, CYAN, CYAN, CYAN,     // sun
-    PINK, RED, YELLOW, YELLOW, YELLOW,  // hot
-    RED, YELLOW, PINK, BLUE, BLUE,      // hell
-    RED, PINK, YELLOW, WHITE, WHITE,    // fire
-    PINK, YELLOW, CYAN, BLUE, RED,      // disco
-    BLUE, CYAN, WHITE, WHITE, WHITE,    // cover
-    WHITE, YELLOW, YELLOW, YELLOW, YELLOW // ink
-);
-const int SUNS = 6;
-const vec3 SUN_COLORS[SUNS] = vec3[SUNS](YELLOW, BLUE, PINK, RED, CYAN, WHITE);
+const vec3 BLACK = @@BLACK@@;
+// The original ray presets have different lengths. Pad their rows for lookup.
+const int MAX_RAY_STOPS = @@MAX_STOPS@@;
+@@RAY_COLORS@@
+@@SUN_COLORS@@
+@@PALETTE_GLSL@@
+@@PALETTE_HIGHLIGHTS@@
 const int TAPS = 2;             // softened brightness: (2 * TAPS + 1) squared samples
 const float TAP_SPREAD = 0.002; // wall heights between samples
 
@@ -67,9 +48,11 @@ void main()
 
     // Each ray carries its own number, so it keeps its color and its place in
     // the shutter sweep as the burst turns.
-    int palette = clamp(int(uMisc.y + 0.5), 0, PALETTES - 1);
-    int stops = COUNTS[palette];
-    vec3 sun = SUN_COLORS[clamp(int(uMisc.z + 0.5), 0, SUNS - 1)];
+    int preset = int(uMisc.y);
+    int palette = int(uMisc.w) - 1;
+    int stops = palette < 0 ? RAY_COUNTS[preset] : STOP_COUNT;
+    int discColor = int(uMisc.z);
+    vec3 sun = discColor < 0 ? paletteHighlight(palette) : SUN_COLORS[discColor];
     float count = max(2.0, uRays.x);
     float place = (atan(point.y, point.x) / (2.0 * PI) + 0.5) * count + uRays.y;
     float ray = floor(place);
@@ -88,9 +71,11 @@ void main()
     float wedge = (body - across) * halfWidth;
     float tip = reach - radius;
 
+    int stop = int(mod(ray, float(stops)) + 0.5) % stops;
+    vec3 rayColor = palette < 0 ? RAY_COLORS[preset * MAX_RAY_STOPS + stop] : paletteStop(palette, stop);
     vec3 color = mix(
         BLACK,
-        STOPS[palette * MAX_STOPS + int(mod(ray, float(stops)) + 0.5) % stops],
+        rayColor,
         clamp(min(min(wedge, blade - ink), tip - ink) / pixel + 0.5, 0.0, 1.0)
     );
     float cover = open > 0.0 ? clamp(min(blade, tip) / pixel + 0.5, 0.0, 1.0) : 0.0;
@@ -111,10 +96,10 @@ import math
 
 MIN_RAYS = 12           # the Rays knob runs from about 12 rays
 MAX_RAYS = 48           # to about 48, rounded to a multiple of the palette's size
-# Ray palettes follow the Remotion brand palettes of the same names, without
-# black (the rays print on black) or the light-blue tint. Order matches the shader.
-PALETTES = {"sun": 3, "hot": 3, "hell": 4, "fire": 4, "disco": 5, "cover": 3, "ink": 2}
-SUN_COLORS = ["yellow", "blue", "pink", "red", "cyan", "white"]
+RAY_COUNTS = @@RAY_COUNTS@@
+SUN_COLORS = @@SUN_COLORS@@
+PALETTE_INDEX = @@PALETTE_INDEX@@
+STOP_COUNT = @@STOP_COUNT@@
 MAX_SPIN = 8.0          # rays per second at the top of the Spin knob
 CLICK_SECONDS = 0.07    # how long one ratchet step takes to land
 BACK = 1.70158          # how far a ratchet step overshoots
@@ -203,7 +188,8 @@ def apply(block, env):
     pop = 1.0 + POP * math.exp(-age / POP_SECONDS)
 
     palette = block.par.Palette.eval()
-    stops = PALETTES[palette]
+    shared = PALETTE_INDEX.get(palette, -1)
+    stops = STOP_COUNT if shared >= 0 else RAY_COUNTS[palette]
     target = MIN_RAYS + (MAX_RAYS - MIN_RAYS) * _clamped(block.par.Rays)
     count = stops * max(2, int(round(target / stops)))
     width = (SOFT_WIDTH + (HARD_WIDTH - SOFT_WIDTH) * env.velocity) * pop
@@ -212,10 +198,25 @@ def apply(block, env):
     _write(burst, 0, _clamped(block.par.Centerx), _clamped(block.par.Centery), disc, _clamped(block.par.Ink) * INK_RANGE)
     _write(burst, 1, float(count), _phase(block.par.Spinmode.eval(), rate) % count, width, _clamped(block.par.Screen))
     _write(burst, 2, reach, env.level, STAGGER, max(MIN_FLOOR, _clamped(block.par.Floor)))
-    sun = SUN_COLORS.index(block.par.Suncolor.eval())
-    _write(burst, 3, _clamped(block.par.Mix), float(list(PALETTES).index(palette)), float(sun))
+    disc_color = block.par.Suncolor.eval()
+    if disc_color == "match":
+        sun = -1 if shared >= 0 else 0
+    else:
+        sun = SUN_COLORS.index(disc_color)
+    preset = list(RAY_COUNTS).index(palette) if shared < 0 else 0
+    _write(burst, 3, _clamped(block.par.Mix), float(preset), float(sun), float(shared + 1))
 '''
 
+RAY_PRESETS = {
+    "sun": ("Sunburst", ("yellow", "blue", "cyan")),
+    "hot": ("Hot", ("pink", "red", "yellow")),
+    "hell": ("Hellfire", ("red", "yellow", "pink", "blue")),
+    "fire": ("Fire", ("red", "pink", "yellow", "white")),
+    "disco": ("Disco", ("pink", "yellow", "cyan", "blue", "red")),
+    "cover": ("Cover", ("blue", "cyan", "white")),
+    "ink": ("Ink", ("white", "yellow")),
+}
+SUN_COLORS = ("yellow", "blue", "pink", "red", "cyan", "white")
 UNIFORMS = ["uSun", "uRays", "uShape", "uMisc"]
 
 
@@ -230,27 +231,37 @@ def build(library):
     add_float(page, "Floor", "Luma Floor", 0.3, 0.0, 1.0, True, True)
     add_float(page, "Centerx", "Center X", 0.5, 0.0, 1.0, True, True)
     add_float(page, "Centery", "Center Y", 0.5, 0.0, 1.0, True, True)
-    add_menu(
+    add_palette_menu(
         page, "Palette", "Ray Colors",
-        ["sun", "hot", "hell", "fire", "disco", "cover", "ink"],
-        [
-            "Sunburst (Yellow Blue Cyan)", "Hot (Pink Red Yellow)", "Hellfire (Red Yellow Pink Blue)",
-            "Fire (Red Pink Yellow White)", "Disco (Pink Yellow Cyan Blue Red)", "Cover (Blue Cyan White)",
-            "Ink (White Yellow)",
-        ],
-        "sun",
+        presets={
+            name: f"{label} ({' '.join(color.title() for color in row)})"
+            for name, (label, row) in RAY_PRESETS.items()
+        }, default="sun",
     )
     add_float(page, "Disc", "Sun Disc", 0.4, 0.0, 1.0, True, True)
     add_menu(
-        page, "Suncolor", "Sun Color",
-        ["yellow", "blue", "pink", "red", "cyan", "white"],
-        ["Yellow", "Blue", "Pink", "Red", "Cyan", "White"],
-        "yellow",
+        page, "Suncolor", "Sun Color", [*SUN_COLORS, "match"],
+        [*(color.title() for color in SUN_COLORS), "Match Ray Palette"], "match",
     )
     add_float(page, "Ink", "Ink Line", 0.35, 0.0, 1.0, True, True)
     add_float(page, "Mix", "Mix", 1.0, 0.0, 1.0, True, True)
 
-    add_text(block, "burst_shader", SHADER, -300, -150)
+    ray_counts = {name: len(row) for name, (_, row) in RAY_PRESETS.items()}
+    max_stops = max(ray_counts.values())
+    rays = tuple(
+        color
+        for _, row in RAY_PRESETS.values()
+        for color in row + (row[-1],) * (max_stops - len(row))
+    )
+    size = len(ray_counts)
+    counts = ", ".join(map(str, ray_counts.values()))
+    ray_colors = f"const int RAY_COUNTS[{size}] = int[{size}]({counts});"
+    shader = palette_shader(
+        SHADER, BLACK=glsl_rgb(SWATCH_RGB8["black"]), MAX_STOPS=str(max_stops),
+        RAY_COLORS=ray_colors + "\n" + glsl_swatches("RAY_COLORS", rays),
+        SUN_COLORS=glsl_swatches("SUN_COLORS", SUN_COLORS),
+    )
+    add_text(block, "burst_shader", shader, -300, -150)
 
     source = add_top(block, inTOP, "in1", -500)
     burst = add_top(block, glslTOP, "burst", -300)
@@ -272,6 +283,10 @@ def build(library):
     switch.inputConnectors[1].connect(burst)
     switch.outputConnectors[0].connect(output)
 
-    add_text(block, "effect", EFFECT_SOURCE, -500, -300)
+    effect = palette_effect(
+        EFFECT_SOURCE, PALETTE_INDEX=PALETTE_INDEX, STOP_COUNT=STOP_COUNT,
+        RAY_COUNTS=ray_counts, SUN_COLORS=SUN_COLORS,
+    )
+    add_text(block, "effect", effect, -500, -300)
     add_callbacks(block)
     return block

@@ -4,18 +4,13 @@ SHADER = r'''
 uniform vec4 uTarget;  // center x, center y, twin separation (in wall widths), target count
 uniform vec4 uRings;   // ring count, phase in bands, cover (1 is the whole wall), palette size
 uniform vec4 uStyle;   // ink width, shadow distance (both wall heights), dot radius in bands, color shift
-uniform vec4 uMisc;    // mix
+uniform vec4 uMisc;    // mix, palette (0 is brand)
 
 layout(location = 0) out vec4 fragColor;
 
 const vec3 BLACK = vec3(0.0);
-const vec3 INKS[5] = vec3[5](
-    vec3(0.1451, 0.4510, 1.0),      // blue
-    vec3(0.9529, 0.8667, 0.2431),   // yellow
-    vec3(1.0, 0.5529, 1.0),         // pink
-    vec3(1.0, 0.2588, 0.3020),      // red
-    vec3(0.2667, 0.9725, 1.0)       // cyan
-);
+@@SWATCHES@@
+@@PALETTE_GLSL@@
 const float MAX_INK = 0.3;      // of a band, so a ring always keeps its color
 const float MAX_SHADOW = 0.45;  // of a band, so a shadow never reaches the next ring
 
@@ -89,7 +84,10 @@ void main()
     // One pixel of antialiasing keeps the edges hard without crawling on the LEDs.
     vec3 color = mix(source.rgb, BLACK, drop > 0.0 ? clamp(shadow / pixel + 0.5, 0.0, 1.0) : 0.0);
     color = mix(color, BLACK, clamp(inside / pixel + 0.5, 0.0, 1.0));
-    color = mix(color, INKS[int(tone + 0.5)], clamp((inside - ink) / pixel + 0.5, 0.0, 1.0));
+    int palette = int(uMisc.y) - 1;
+    int stop = int(tone + 0.5);
+    vec3 inkColor = palette < 0 ? INKS[stop] : paletteStop(palette, stop);
+    color = mix(color, inkColor, clamp((inside - ink) / pixel + 0.5, 0.0, 1.0));
 
     fragColor = TDOutputSwizzle(vec4(mix(source.rgb, color, uMisc.x), source.a));
 }
@@ -116,7 +114,8 @@ SWELL = 1.3
 INK_RANGE = 0.02        # wall heights
 SHADOW_RANGE = 0.06     # wall heights
 MAX_DT = 0.1
-PALETTES = {"cover": 1, "target": 2, "candy": 5}
+PALETTES = {"cover": 1, "target": 2, "candy": @@STOP_COUNT@@}
+PALETTE_INDEX = @@PALETTE_INDEX@@
 
 _travel = 0.0
 _presses = 0
@@ -219,7 +218,7 @@ def apply(block, env):
     _write(rings, 0, _clamped(block.par.Centerx), _clamped(block.par.Centery), _clamped(block.par.Spread), targets)
     _write(rings, 1, float(count), phase % PHASE_WRAP, cover, float(palette))
     _write(rings, 2, _clamped(block.par.Ink) * INK_RANGE, _clamped(block.par.Shadow) * SHADOW_RANGE, dot, float((_presses - 1) % palette))
-    _write(rings, 3, _clamped(block.par.Mix))
+    _write(rings, 3, _clamped(block.par.Mix), PALETTE_INDEX.get(block.par.Colorpalette.eval(), -1) + 1)
 '''
 
 UNIFORMS = ["uTarget", "uRings", "uStyle", "uMisc"]
@@ -239,9 +238,11 @@ def build(library):
     add_float(page, "Centery", "Center Y", 0.5, 0.0, 1.0, True, True)
     add_float(page, "Ink", "Ink Line", 0.5, 0.0, 1.0, True, True)
     add_float(page, "Shadow", "Hard Shadow", 0.4, 0.0, 1.0, True, True)
+    add_palette_menu(page, "Colorpalette", "Color Palette", presets={"brand": "Brand"}, default="brand")
     add_float(page, "Mix", "Mix", 1.0, 0.0, 1.0, True, True)
 
-    add_text(block, "rings_shader", SHADER, -300, -150)
+    shader = palette_shader(SHADER, SWATCHES=glsl_swatches("INKS", ("blue", "yellow", "pink", "red", "cyan")))
+    add_text(block, "rings_shader", shader, -300, -150)
 
     source = add_top(block, inTOP, "in1", -500)
     rings = add_top(block, glslTOP, "rings", -300)
@@ -263,6 +264,7 @@ def build(library):
     switch.inputConnectors[1].connect(rings)
     switch.outputConnectors[0].connect(output)
 
-    add_text(block, "effect", EFFECT_SOURCE, -500, -300)
+    effect = palette_effect(EFFECT_SOURCE, PALETTE_INDEX=PALETTE_INDEX, STOP_COUNT=STOP_COUNT)
+    add_text(block, "effect", effect, -500, -300)
     add_callbacks(block)
     return block

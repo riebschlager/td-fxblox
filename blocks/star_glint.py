@@ -41,7 +41,7 @@ STARS_SHADER = r'''
 uniform vec4 uClock;  // twinkle phase, pop, seed, level
 uniform vec4 uStars;  // share of cells lit, radius in cells, spike lines, angle
 uniform vec4 uLight;  // highlight cutoff, floor, rainbow, glow
-uniform vec3 uHero;   // count, radius in wall heights, mix
+uniform vec4 uHero;   // count, radius in wall heights, mix, palette (0 is spectrum)
 
 layout(location = 0) out vec4 fragColor;
 
@@ -57,7 +57,7 @@ const float HERO_FLOOR = 0.45;   // heroes still show this strongly on dark area
 const float CORE = 0.05;         // share of the radius
 const float HALO = 0.3;          // share of the radius
 const float HALO_GAIN = 0.4;
-const vec3 SILVER = vec3(0.92, 0.95, 1.0);
+const vec3 SILVER = @@SILVER@@;
 const vec3 LUMA = vec3(0.2126, 0.7152, 0.0722);
 
 float hash(vec2 place, float salt)
@@ -67,8 +67,13 @@ float hash(vec2 place, float salt)
     return fract((q.x + q.y) * q.z);
 }
 
+@@PALETTE_GLSL@@
+@@PALETTE_CYCLE@@
+
 vec3 spectrum(float t)
 {
+    int palette = int(uHero.w) - 1;
+    if (palette >= 0) return paletteCycle(palette, t);
     return 0.5 + 0.5 * cos(2.0 * PI * (t + vec3(0.0, 0.33, 0.67)));
 }
 
@@ -181,6 +186,8 @@ void main()
 EFFECT_SOURCE = r'''
 import math
 
+PALETTE_INDEX = @@PALETTE_INDEX@@
+
 GOLDEN = 0.618034        # steps the seed so each press gets a new pattern
 MAX_DT = 0.1
 POP_SECONDS = 0.18
@@ -267,7 +274,8 @@ def apply(block, env):
         ANGLE + ROTATE * age,
     )
     _write(stars, 2, cutoff, _clamped(block.par.Floor), _clamped(block.par.Rainbow), glow)
-    _write(stars, 3, float(heroes), (0.25 + 0.55 * size) * scale, _clamped(block.par.Mix))
+    palette = PALETTE_INDEX.get(block.par.Palette.eval(), -1) + 1
+    _write(stars, 3, float(heroes), (0.25 + 0.55 * size) * scale, _clamped(block.par.Mix), palette)
 
     _write(op("extract"), 0, cutoff, EXTRACT_SOFTNESS)
 '''
@@ -302,11 +310,13 @@ def build(library):
     add_float(page, "Floor", "Dark Clip Floor", 0.25, 0.0, 1.0, True, True)
     add_float(page, "Rainbow", "Rainbow Edge", 0.25, 0.0, 1.0, True, True)
     add_float(page, "Glow", "Glow", 0.5, 0.0, 1.0, True, True)
+    add_palette_menu(page, "Palette", "Rainbow Palette", presets={"spectrum": "Spectrum"}, default="spectrum")
     add_float(page, "Mix", "Mix", 1.0, 0.0, 1.0, True, True)
 
     add_text(block, "extract_shader", EXTRACT_SHADER, -900, -150)
     add_text(block, "blur_shader", BLUR_SHADER, -700, -150)
-    add_text(block, "stars_shader", STARS_SHADER, -300, -150)
+    shader = palette_shader(STARS_SHADER, SILVER=f"vec3{PRISM_SILVER}")
+    add_text(block, "stars_shader", shader, -300, -150)
 
     source = add_top(block, inTOP, "in1", -1100)
     # Each halving makes the glow cheaper and wider. Float keeps it from banding.
@@ -332,6 +342,7 @@ def build(library):
     switch.inputConnectors[1].connect(stars)
     switch.outputConnectors[0].connect(output)
 
-    add_text(block, "effect", EFFECT_SOURCE, -500, -300)
+    effect = palette_effect(EFFECT_SOURCE, PALETTE_INDEX=PALETTE_INDEX)
+    add_text(block, "effect", effect, -500, -300)
     add_callbacks(block)
     return block

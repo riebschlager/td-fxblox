@@ -298,16 +298,9 @@ THRESHOLD_RANGE = 0.6
 BOIL_RATE = 16.0        # redraws per second at full
 PUMP_LINES = 8.0        # lines per second while a Gate is held
 MAX_DT = 0.1
-SEQUENCE = ("blue", "pink", "yellow", "red", "cyan")
-COLORS = {
-    "blue": (0.1451, 0.4510, 1.0, 0.0),
-    "pink": (1.0, 0.5529, 1.0, 0.0),
-    "yellow": (0.9529, 0.8667, 0.2431, 0.0),
-    "red": (1.0, 0.2588, 0.3020, 0.0),
-    "cyan": (0.2667, 0.9725, 1.0, 0.0),
-    "white": (1.0, 1.0, 1.0, 0.0),
-    "black": (0.0, 0.0, 0.0, 1.0),
-}
+SEQUENCE = @@SEQUENCE@@
+COLORS = @@SWATCHES@@
+PALETTES = @@PALETTES@@
 LOOK_ENTRY = SLOTS * 2
 MISC_ENTRY = LOOK_ENTRY + 1
 
@@ -359,9 +352,11 @@ def _pick_color(block):
     choice = block.par.Color.eval()
     if choice in COLORS:
         return COLORS[choice]
-    name = SEQUENCE[_next_color % len(SEQUENCE)]
-    _next_color = (_next_color + 1) % len(SEQUENCE)
-    return COLORS[name]
+    stops = PALETTES.get(choice, SEQUENCE)
+    red, green, blue = stops[_next_color % len(stops)]
+    _next_color = (_next_color + 1) % len(stops)
+    ink = float(choice in PALETTES and 0.2126 * red + 0.7152 * green + 0.0722 * blue < 0.2)
+    return red, green, blue, ink
 
 
 def _launch(block, velocity):
@@ -484,11 +479,10 @@ def build(library):
     block.par.Release.normMax = 8.0
     block.par.Release.max = 8.0
     page = block.appendCustomPage("Line Work")
-    add_menu(
+    add_palette_menu(
         page, "Color", "Color",
-        ["cycle", "blue", "pink", "yellow", "red", "cyan", "white", "black"],
-        ["Cycle", "Blue", "Pink", "Yellow", "Red", "Cyan", "White", "Black"],
-        "cycle",
+        presets={"cycle": "Cycle", **{name: name.title() for name in SWATCH_RGB}},
+        default="cycle",
     )
     add_float(page, "Lines", "Most Lines", 0.5, 0.0, 1.0, True, True)
     add_float(page, "Spacing", "Line Spacing", 0.3, 0.0, 1.0, True, True)
@@ -547,6 +541,11 @@ def build(library):
     switch.inputConnectors[1].connect(ink)
     switch.outputConnectors[0].connect(output)
 
-    add_text(block, "effect", EFFECT_SOURCE, -500, -300)
+    swatches = {name: (*rgb, float(name == "black")) for name, rgb in SWATCH_RGB.items()}
+    effect = palette_effect(
+        EFFECT_SOURCE, SWATCHES=swatches, PALETTES=PALETTE_RGB,
+        SEQUENCE=tuple(SWATCH_RGB[name] for name in BRAND_COLORS),
+    )
+    add_text(block, "effect", effect, -500, -300)
     add_callbacks(block)
     return block

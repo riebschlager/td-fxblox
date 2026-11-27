@@ -17,6 +17,8 @@ from pathlib import Path
 
 import pytest
 
+from palettes import PALETTE_INDEX, PALETTE_LABELS, PALETTE_RGB
+
 REPO_ROOT = Path(__file__).resolve().parents[1]
 BUILD_PY = REPO_ROOT / 'build.py'
 BLOCKS_DIR = BUILD_PY.parent / 'blocks'
@@ -366,7 +368,7 @@ def test_public_build_works_without_show_integration(tmp_path):
     w = World(tmp_path)
     source = tmp_path / 'checkout'
     source.mkdir()
-    for filename in ('build.py', 'kit.py', 'engine.py'):
+    for filename in ('build.py', 'kit.py', 'engine.py', 'palettes.py'):
         shutil.copyfile(REPO_ROOT / filename, source / filename)
     (source / 'blocks').mkdir()
     shutil.copyfile(BLOCKS_DIR / 'zoom_punch.py', source / 'blocks' / 'zoom_punch.py')
@@ -1693,6 +1695,22 @@ def assert_uniforms_match_shaders(block):
         assert entries == declared, node.name
 
 
+def glsl_hex_colors(source):
+    return [
+        ''.join('%02x' % int(float(channel)) for channel in channels.split(','))
+        for channels in re.findall(r'vec3\(([\d., ]+)\) / 255\.0', source)
+    ]
+
+
+def shader_color_array(source, name):
+    body = re.search(rf'const vec3 {name}\[.*? = vec3\[.*?\]\((.*?)\);', source, re.S).group(1)
+    return glsl_hex_colors(body)
+
+
+def reference_rgb(name):
+    return tuple(channel / 255 for channel in bytes.fromhex(REFERENCE_PALETTE[name.upper()]))
+
+
 def test_gradient_shader_uniforms_match_their_entries(gradient):
     assert_uniforms_match_shaders(gradient)
 
@@ -2151,12 +2169,7 @@ def test_gong_wiring(gong):
 
 
 def test_gong_shader_uniforms_match_their_entries(gong):
-    node = gong.op('ring')
-    text = gong.op(node.par.pixeldat.val).text
-    assert node.seq.vec.numBlocks == 10
-    for index in range(10):
-        uniform = getattr(node.par, 'vec%dname' % index).val
-        assert re.search(r'uniform vec\d %s;' % uniform, text), uniform
+    assert_uniforms_match_shaders(gong)
 
 
 def test_gong_lands_on_the_very_first_frame(world, gong):
@@ -2493,7 +2506,7 @@ def test_linework_takes_over_on_the_very_first_frame(world, linework):
     assert linework.op('switch').par.index.val == 1
     assert len(flying(linework)) == 1
     assert flying(linework)[0][0] == 0.0
-    assert wave_colors(linework)[0][:3] == pytest.approx((0.1451, 0.4510, 1.0))
+    assert wave_colors(linework)[0][:3] == reference_rgb('blue')
 
 
 def test_linework_velocity_sets_the_line_count(world, linework):
@@ -2543,7 +2556,7 @@ def test_linework_locked_color_sticks(world, linework):
         press_line(world, linework)
         world.tick(linework, 200)
     press_line(world, linework)
-    assert wave_colors(linework)[0][:3] == pytest.approx((1.0, 0.2588, 0.3020))
+    assert wave_colors(linework)[0][:3] == reference_rgb('red')
 
 
 def test_linework_black_background_gets_white_ink(world, linework):
@@ -2758,13 +2771,8 @@ def test_slam_shader_uniforms_match_their_entries(slam, name, count):
 
 
 def test_slam_palette_is_the_brand_chromatics_in_index_order(slam):
-    text = slam.op('slam_shader').text
-    found = re.findall(r'vec3\(([\d., ]+)\),?\s+// (blue|pink|yellow|red|cyan)', text)
-    assert [name for _, name in found] == ['blue', 'pink', 'yellow', 'red', 'cyan']
-    hexes = {'blue': '2573FF', 'pink': 'FF8DFF', 'yellow': 'F3DD3E', 'red': 'FF424D', 'cyan': '44F8FF'}
-    for values, name in found:
-        rgb = [round(float(v) * 255) for v in values.split(',')]
-        assert '%02X%02X%02X' % tuple(rgb) == hexes[name]
+    colors = shader_color_array(slam.op('slam_shader').text, 'PALETTE')
+    assert colors == [REFERENCE_PALETTE[name] for name in ('BLUE', 'PINK', 'YELLOW', 'RED', 'CYAN')]
 
 
 def test_slam_field_size_matches_its_shader(slam):
@@ -3083,8 +3091,8 @@ def test_clap_shader_uniforms_match_their_entries(clap, name, count):
 
 
 def test_clap_yellow_is_the_brand_yellow(clap):
-    values = re.search(r'YELLOW = vec3\(([\d., ]+)\)', clap.op('clap_shader').text).group(1)
-    assert '%02X%02X%02X' % tuple(round(float(v) * 255) for v in values.split(',')) == 'F3DD3E'
+    yellow = re.search(r'const vec3 YELLOW = .*?;', clap.op('clap_shader').text).group()
+    assert glsl_hex_colors(yellow) == [REFERENCE_PALETTE['YELLOW']]
 
 
 def test_clap_lands_on_the_very_first_frame(world, clap):
@@ -3454,21 +3462,15 @@ def sun_shader(block):
 
 
 def test_sun_colors_match_the_reference_palette(sun):
-    constants = re.findall(r'const vec3 ([A-Z]+) = vec3\(([\d., ]+)\) / 255\.0;', sun_shader(sun))
-    actual = {
-        name: ''.join('%02x' % int(float(c)) for c in channels.split(','))
-        for name, channels in constants
-    }
-    assert actual == REFERENCE_PALETTE
+    colors = shader_color_array(sun_shader(sun), 'SUN_COLORS')
+    assert sun.par.Suncolor.menuNames[-1] == 'match'
+    assert colors == [REFERENCE_PALETTE[name.upper()] for name in sun.par.Suncolor.menuNames[:-1]]
 
 
 def test_sun_palettes_match_the_menu_and_original_color_order(sun):
     text = sun_shader(sun)
-    rows = re.findall(r'^\s+([A-Z]+(?:, [A-Z]+)+),?\s+// (\w+)$', text, re.M)
-    counts = [int(n) for n in re.search(r'int\[PALETTES\]\(([\d, ]+)\)', text).group(1).split(',')]
-    names = sun.par.Palette.menuNames
-    assert [name for _, name in rows] == names
-    assert len(counts) == len(names)
+    counts = re.search(r'RAY_COUNTS\[7\] = int\[7\]\(([\d, ]+)\)', text).group(1)
+    colors = shader_color_array(text, 'RAY_COLORS')
     expected = {
         'sun': ['YELLOW', 'BLUE', 'CYAN'],
         'hot': ['PINK', 'RED', 'YELLOW'],
@@ -3478,14 +3480,13 @@ def test_sun_palettes_match_the_menu_and_original_color_order(sun):
         'cover': ['BLUE', 'CYAN', 'WHITE'],
         'ink': ['WHITE', 'YELLOW'],
     }
-    for (row, name), count in zip(rows, counts):
-        colors = row.split(', ')
-        assert len(colors) == 5
-        assert colors[:count] == expected[name]
-        assert 'BLACK' not in colors  # rays print on black
-    suns = re.search(r'SUN_COLORS\[SUNS\] = vec3\[SUNS\]\(([A-Z, ]+)\)', text).group(1).split(', ')
-    assert [c.lower() for c in suns] == sun.par.Suncolor.menuNames
-    assert re.search(r'const int SUNS = %d;' % len(suns), text)
+    assert sun.par.Palette.menuNames == list(expected) + list(PALETTE_INDEX)
+    assert [int(count) for count in counts.split(',')] == [len(row) for row in expected.values()]
+    assert colors == [
+        REFERENCE_PALETTE[color]
+        for row in expected.values()
+        for color in row + [row[-1]] * (5 - len(row))
+    ]
 
 
 @pytest.mark.parametrize('palette,size', [('sun', 3), ('hot', 3), ('hell', 4), ('fire', 4), ('disco', 5), ('cover', 3), ('ink', 2)])
@@ -4204,11 +4205,8 @@ def test_ringpop_palette_sets_the_color_count(world, ringpop, name, size):
 
 
 def test_ringpop_shader_inks_are_the_brand_colors(ringpop):
-    text = ringpop.op('rings_shader').text
-    rows = re.findall(r'vec3\(([\d.]+), ([\d.]+), ([\d.]+)\),?\s+// (\w+)', text)
-    hexes = {name: ''.join('%02X' % round(float(c) * 255) for c in rgb) for *rgb, name in rows}
-    assert hexes == {'blue': '2573FF', 'yellow': 'F3DD3E', 'pink': 'FF8DFF',
-                     'red': 'FF424D', 'cyan': '44F8FF'}
+    colors = shader_color_array(ringpop.op('rings_shader').text, 'INKS')
+    assert colors == [REFERENCE_PALETTE[name] for name in ('BLUE', 'YELLOW', 'PINK', 'RED', 'CYAN')]
 
 
 def test_ringpop_twin_and_position_reach_the_shader(world, ringpop):
@@ -4414,12 +4412,8 @@ def test_bulbgrid_candy_shifts_each_press_and_press_palette_rotates(world, bulbg
 
 
 def test_bulbgrid_shader_inks_are_the_brand_colors(bulbgrid):
-    text = bulbgrid.op('bulbs_shader').text
-    rows = re.findall(r'vec3\(([\d.]+), ([\d.]+), ([\d.]+)\),?\s+// (\w+)', text)
-    hexes = {name: ''.join('%02X' % round(float(c) * 255) for c in rgb) for *rgb, name in rows}
-    assert hexes == {'blue': '2573FF', 'yellow': 'F3DD3E', 'pink': 'FF8DFF',
-                     'red': 'FF424D', 'cyan': '44F8FF'}
-    assert 'vec3(1.0)                       // white' in text
+    colors = shader_color_array(bulbgrid.op('bulbs_shader').text, 'INKS')
+    assert colors == [REFERENCE_PALETTE[name] for name in ('YELLOW', 'BLUE', 'PINK', 'RED', 'CYAN', 'WHITE')]
 
 
 def test_bulbgrid_aim_ink_shadow_mix_reach_the_shader(world, bulbgrid):
@@ -4625,16 +4619,16 @@ def test_fault_hot_gap_cycles_from_the_first_press(world, fault):
         hit(world, fault)
         colors.append(fault_gap(fault)[:3])
         world.tick(fault, FPS)
-    assert colors[0] == pytest.approx((1.0, 0.5529, 1.0))
-    assert colors[1] == pytest.approx((1.0, 0.2588, 0.3020))
-    assert colors[2] == pytest.approx((0.9529, 0.8667, 0.2431))
+    assert colors[0] == reference_rgb('pink')
+    assert colors[1] == reference_rgb('red')
+    assert colors[2] == reference_rgb('yellow')
     assert colors[3] == colors[0]
 
 
 def test_fault_fixed_gap_color(world, fault):
     fault.par.Gapcolor = 'cyan'
     hit(world, fault)
-    assert fault_gap(fault)[:3] == pytest.approx((0.2667, 0.9725, 1.0))
+    assert fault_gap(fault)[:3] == reference_rgb('cyan')
 
 
 def test_fault_retrigger_restarts_with_a_new_path(world, fault):
@@ -4877,16 +4871,16 @@ def test_plates_hot_gap_cycles_from_the_first_press(world, plates):
         hit(world, plates)
         colors.append(plates_gap(plates)[:3])
         world.tick(plates, FPS)
-    assert colors[0] == pytest.approx((1.0, 0.5529, 1.0))
-    assert colors[1] == pytest.approx((1.0, 0.2588, 0.3020))
-    assert colors[2] == pytest.approx((0.9529, 0.8667, 0.2431))
+    assert colors[0] == reference_rgb('pink')
+    assert colors[1] == reference_rgb('red')
+    assert colors[2] == reference_rgb('yellow')
     assert colors[3] == colors[0]
 
 
 def test_plates_fixed_gap_color(world, plates):
     plates.par.Gapcolor = 'cyan'
     hit(world, plates)
-    assert plates_gap(plates)[:3] == pytest.approx((0.2667, 0.9725, 1.0))
+    assert plates_gap(plates)[:3] == reference_rgb('cyan')
 
 
 def test_plates_ink_thins_as_they_close(world, plates):
@@ -4939,7 +4933,7 @@ def test_plates_reset_and_frame_gap(world, plates):
     assert_plates_at_rest(plates)
     world.tick(plates, 2)
     hit(world, plates)
-    assert plates_gap(plates)[:3] == pytest.approx((1.0, 0.5529, 1.0))  # reset restarted the hot cycle
+    assert plates_gap(plates)[:3] == reference_rgb('pink')  # reset restarted the hot cycle
     world.abs_time.frame += 31
     world.tick(plates)
     assert_plates_at_rest(plates)
@@ -5537,8 +5531,8 @@ def test_road_sky_menu_sets_the_colors(world, road):
     blue = uniforms(road, 'road', 3)
     road.par.Sky = 'red'
     world.tick(road)
-    assert blue[:3] == pytest.approx((0.1451, 0.4510, 1.0))
-    assert uniforms(road, 'road', 3)[:3] == pytest.approx((1.0, 0.2588, 0.3020))
+    assert blue[:3] == reference_rgb('blue')
+    assert uniforms(road, 'road', 3)[:3] == reference_rgb('red')
 
 
 def test_road_crash_flips_up_flat_then_rattles_and_returns(world, road):
@@ -6016,7 +6010,7 @@ def test_shades_menus_reach_the_shader(world, shades):
     assert uniforms(shades, 'shades', 4)[1] == 4
     assert uniforms(shades, 'shades', 0)[3] == 2
     colors = {uniforms(shades, 'shades', i)[:3] for i in range(5, 10)}
-    assert colors == {(1.0, 0.5529, 1.0), (0.9529, 0.8667, 0.2431)}
+    assert colors == {reference_rgb('pink'), reference_rgb('yellow')}
 
 
 def test_shades_fill_follows_the_knob_live(world, shades):
@@ -7253,7 +7247,7 @@ def test_wipe_menus_match_the_effect(swipe):
     module = wipe_module(swipe)
     assert swipe.par.Shape.menuNames == module.SHAPES + ['shuffle']
     assert swipe.par.Exit.menuNames == module.EXITS
-    assert swipe.par.Color.menuNames == ['cycle'] + list(module.COLORS)
+    assert swipe.par.Color.menuNames == ['cycle'] + list(module.COLORS) + list(PALETTE_INDEX)
     text = swipe.op('wipe_shader').text
     assert 'const int BAR = %d;' % module.SHAPES.index('bar') in text
     for index, name in enumerate(['fade', 'punch', 'halftone', 'retreat', 'wipeoff']):
@@ -7329,7 +7323,7 @@ def test_wipe_picked_color_is_used_every_time(world, swipe):
     swipe.par.Color = 'yellow'
     for _ in range(3):
         wipe_hit(world, swipe)
-        assert wipe_color(swipe)[:3] == wipe_module(swipe).YELLOW
+        assert wipe_color(swipe)[:3] == reference_rgb('yellow')
         world.tick(swipe, FPS * 2)
 
 
@@ -7984,3 +7978,59 @@ def test_smear_max_hold(world, smear):
     smear.par.Trigger = 1.0
     world.tick(smear, FPS * 2)
     assert_smear_at_rest(smear)
+
+
+@pytest.mark.parametrize('name,menu,node,entry,channel', [
+    ('bulb_grid', 'Palette', 'bulbs', 4, 2),
+    ('color_block_slam', 'Palette', 'slam', 1, 1),
+    ('confetti_cannon', 'Palette', 'confetti', 3, 3),
+    ('gradient_flow', 'Palette', 'map', 0, 0),
+    ('gradient_map', 'Palette', 'map', 0, 0),
+    ('ring_pop', 'Colorpalette', 'rings', 3, 1),
+    ('road_rush', 'Sky', 'road', 5, 3),
+    ('star_glint', 'Palette', 'stars', 3, 3),
+    ('sunburst', 'Palette', 'burst', 3, 3),
+    ('thunderclap', 'Palette', 'clap', 1, 3),
+    ('twinkle_cannon', 'Palette', 'twinkle', 4, 2),
+])
+def test_shared_palette_menu_matches_shader_rows_and_uniform(world, name, menu, node, entry, channel):
+    block = world.block(name)
+    par = getattr(block.par, menu)
+    assert par.menuNames[-len(PALETTE_LABELS):] == list(PALETTE_LABELS)
+    assert par.menuLabels[-len(PALETTE_LABELS):] == list(PALETTE_LABELS.values())
+    shader = block.op(block.op(node).par.pixeldat.val).text
+    assert shader_color_array(shader, 'STOPS') == shader_color_array(map_shader(world.block('gradient_map')), 'STOPS')
+
+    block.par.Attack = 0.0
+    setattr(block.par, menu, 'ylorrd')
+    hit(world, block)
+    offset = 0 if name.startswith('gradient_') else 1
+    assert uniforms(block, node, entry)[channel] == PALETTE_INDEX['ylorrd'] + offset
+    if name == 'sunburst':
+        assert uniforms(block, 'burst', 1)[0] % len(PALETTE_RGB['ylorrd']) == 0
+        assert uniforms(block, 'burst', 3)[2] == -1.0
+
+
+@pytest.mark.parametrize('name,menu,node,entry', [
+    ('fault_line', 'Gapcolor', 'fault', 2),
+    ('fault_plates', 'Gapcolor', 'plates', 1),
+    ('gong_ring', 'Palette', 'ring', 10),
+    ('line_work', 'Color', 'ink', 4),
+    ('road_rush', 'Sky', 'road', 3),
+    ('shape_wipe', 'Color', 'wipe', 2),
+    ('window_shades', 'Colorset', 'shades', 5),
+])
+def test_shared_palette_colors_reach_rgb_uniforms(world, name, menu, node, entry):
+    block = world.block(name)
+    par = getattr(block.par, menu)
+    assert par.menuNames[-len(PALETTE_LABELS):] == list(PALETTE_LABELS)
+    assert par.menuLabels[-len(PALETTE_LABELS):] == list(PALETTE_LABELS.values())
+
+    block.par.Attack = 0.0
+    setattr(block.par, menu, 'viridis')
+    hit(world, block)
+    stops = PALETTE_RGB['viridis']
+    actual = uniforms(block, node, entry)[:3]
+    assert actual in stops
+    if name == 'window_shades':
+        assert {uniforms(block, node, i)[:3] for i in range(entry, entry + len(stops))} == set(stops)

@@ -8,7 +8,7 @@ SHADER = r'''
 uniform vec4 uLook;    // count, radius, ink, shadow (lengths in wall heights)
 uniform vec4 uFlight;  // launch speed, half cone in radians, gravity, drag
 uniform vec4 uAir;     // flutter, spin, wind, origin across the wall
-uniform vec4 uRig;     // cannons, mix, band half width for Rain, unused
+uniform vec4 uRig;     // cannons, mix, band half width for Rain, palette (0 is brand)
 uniform vec4 uKind;    // each shot's motion: 0 rain, 1 burst, 2 corners, 3 blast, -1 empty
 uniform vec4 uPour;    // each shot's seconds of pouring, Rain only
 uniform vec4 uShot0;   // age, seed, velocity, level
@@ -21,14 +21,8 @@ layout(location = 0) out vec4 fragColor;
 const int SHOTS = 4;
 const float PI = 3.14159265;
 const float TAU = 6.2831853;
-const vec3 BRAND[6] = vec3[6](
-    vec3(0.1451, 0.4510, 1.0),
-    vec3(1.0, 0.5529, 1.0),
-    vec3(0.9529, 0.8667, 0.2431),
-    vec3(1.0, 0.2588, 0.3020),
-    vec3(0.2667, 0.9725, 1.0),
-    vec3(1.0, 1.0, 1.0)
-);
+@@SWATCHES@@
+@@PALETTE_GLSL@@
 const float JITTER = 0.5;         // of a cell, so a particle strays a quarter cell either way
 const float SWAY = 0.2;           // of a cell, the flutter's reach
 const float FALL_MIN = 0.65;      // columns fall at different speeds so nothing moves as a sheet
@@ -106,7 +100,11 @@ void stamp(vec2 q, vec3 id, float age, float level, float radius, float px)
     if (alpha <= 0.0) {
         return;
     }
-    vec3 color = BRAND[int(fract(id.z * 11.7) * 6.0)];
+    float pick = fract(id.z * 11.7);
+    int palette = int(uRig.w) - 1;
+    vec3 color = palette < 0
+        ? BRAND[int(pick * float(BRAND.length()))]
+        : paletteStop(palette, int(pick * float(STOP_COUNT)));
     paint = vec4(color * cover(body, px), alpha);
     paintDepth = id.x;
 }
@@ -248,6 +246,7 @@ EFFECT_SOURCE = r'''
 import math
 import random
 
+PALETTE_INDEX = @@PALETTE_INDEX@@
 COUNT_LOW = 40.0
 COUNT_RANGE = 560.0
 RADIUS_LOW = 0.006
@@ -386,7 +385,7 @@ def apply(block, env):
     wind = max(-1.0, min(1.0, par.Wind.eval())) * WIND_SCALE
     _write(node, 2, _clamped(par.Flutter), SPIN_SCALE * _clamped(par.Spin), wind, _clamped(par.Origin))
     cannons = max(1, min(5, int(round(par.Cannons.eval()))))
-    _write(node, 3, float(cannons), _clamped(par.Mix), BAND_SCALE * spread, 0.0)
+    _write(node, 3, float(cannons), _clamped(par.Mix), BAND_SCALE * spread, PALETTE_INDEX.get(par.Palette.eval(), -1) + 1)
     _write_shots(node)
 '''
 
@@ -418,9 +417,11 @@ def build(library):
     add_float(page, "Size", "Size", 0.35, 0.0, 1.0, True, True)
     add_float(page, "Ink", "Ink", 0.5, 0.0, 1.0, True, True)
     add_float(page, "Shadow", "Shadow", 0.5, 0.0, 1.0, True, True)
+    add_palette_menu(page, presets={"brand": "Brand"}, default="brand")
     add_float(page, "Mix", "Mix", 1.0, 0.0, 1.0, True, True)
 
-    add_text(block, "confetti_shader", SHADER, -300, -150)
+    shader = palette_shader(SHADER, SWATCHES=glsl_swatches("BRAND", (*BRAND_COLORS, "white")))
+    add_text(block, "confetti_shader", shader, -300, -150)
 
     source = add_top(block, inTOP, "in1", -500)
     confetti = add_top(block, glslTOP, "confetti", -300)
@@ -442,6 +443,7 @@ def build(library):
     switch.inputConnectors[1].connect(confetti)
     switch.outputConnectors[0].connect(output)
 
-    add_text(block, "effect", EFFECT_SOURCE, -500, -300)
+    effect = palette_effect(EFFECT_SOURCE, PALETTE_INDEX=PALETTE_INDEX)
+    add_text(block, "effect", effect, -500, -300)
     add_callbacks(block)
     return block

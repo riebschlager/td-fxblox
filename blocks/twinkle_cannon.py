@@ -9,7 +9,7 @@ uniform vec4 uLook;    // count, radius in wall heights, glow, softness
 uniform vec4 uFlight;  // launch speed, half cone in radians, gravity, drag
 uniform vec4 uAir;     // flutter, spike angle, wind, origin across the wall
 uniform vec4 uRig;     // cannons, mix, band half width for Rain, twinkle phase
-uniform vec4 uStyle;   // spike lines, rainbow, unused, unused
+uniform vec4 uStyle;   // spike lines, rainbow, palette (0 is spectrum)
 uniform vec4 uKind;    // each shot's motion: 0 rain, 1 burst, 2 corners, 3 blast, -1 empty
 uniform vec4 uPour;    // each shot's seconds of pouring, Rain only
 uniform vec4 uShot0;   // age, seed, velocity, level
@@ -48,7 +48,7 @@ const float SOFT_SPREAD = 3.0;    // Softness widens spikes and cores by up to t
 const float CORE = 0.05;          // of the radius
 const float HALO = 0.3;           // of the radius
 const float HALO_GAIN = 0.4;
-const vec3 SILVER = vec3(0.92, 0.95, 1.0);
+const vec3 SILVER = @@SILVER@@;
 
 vec3 hash(vec3 p)
 {
@@ -57,8 +57,13 @@ vec3 hash(vec3 p)
     return fract((p.xxy + p.yxx) * p.zyx);
 }
 
+@@PALETTE_GLSL@@
+@@PALETTE_CYCLE@@
+
 vec3 spectrum(float t)
 {
+    int palette = int(uStyle.z) - 1;
+    if (palette >= 0) return paletteCycle(palette, t);
     return 0.5 + 0.5 * cos(TAU * (t + vec3(0.0, 0.33, 0.67)));
 }
 
@@ -234,6 +239,8 @@ void main()
 
 EFFECT_SOURCE = r'''
 import math
+
+PALETTE_INDEX = @@PALETTE_INDEX@@
 import random
 
 COUNT_LOW = 20.0
@@ -392,7 +399,8 @@ def apply(block, env):
     _write(node, 2, _clamped(par.Flutter), SPIKE_ANGLE + _turn, wind, _clamped(par.Origin))
     cannons = max(1, min(5, int(round(par.Cannons.eval()))))
     _write(node, 3, float(cannons), _clamped(par.Mix), spread, _phase)
-    _write(node, 4, LINES[par.Points.eval()], _clamped(par.Rainbow), 0.0, 0.0)
+    palette = PALETTE_INDEX.get(par.Palette.eval(), -1) + 1
+    _write(node, 4, LINES[par.Points.eval()], _clamped(par.Rainbow), palette, 0.0)
     _write_shots(node)
 '''
 
@@ -427,9 +435,11 @@ def build(library):
     add_float(page, "Softness", "Softness", 0.5, 0.0, 1.0, True, True)
     add_float(page, "Rainbow", "Rainbow Edge", 0.25, 0.0, 1.0, True, True)
     add_float(page, "Glow", "Glow", 0.5, 0.0, 1.0, True, True)
+    add_palette_menu(page, "Palette", "Rainbow Palette", presets={"spectrum": "Spectrum"}, default="spectrum")
     add_float(page, "Mix", "Mix", 1.0, 0.0, 1.0, True, True)
 
-    add_text(block, "twinkle_shader", SHADER, -300, -150)
+    shader = palette_shader(SHADER, SILVER=f"vec3{PRISM_SILVER}")
+    add_text(block, "twinkle_shader", shader, -300, -150)
 
     source = add_top(block, inTOP, "in1", -500)
     twinkle = add_top(block, glslTOP, "twinkle", -300)
@@ -451,6 +461,7 @@ def build(library):
     switch.inputConnectors[1].connect(twinkle)
     switch.outputConnectors[0].connect(output)
 
-    add_text(block, "effect", EFFECT_SOURCE, -500, -300)
+    effect = palette_effect(EFFECT_SOURCE, PALETTE_INDEX=PALETTE_INDEX)
+    add_text(block, "effect", effect, -500, -300)
     add_callbacks(block)
     return block

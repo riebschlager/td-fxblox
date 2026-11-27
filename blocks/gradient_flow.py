@@ -133,7 +133,7 @@ const float REACH_EDGE = 0.3;  // the aura's outer edge fades over this share of
 // Wraps around the row. Index runs from -1 to count, and % is undefined for negatives in GLSL.
 vec3 stopColor(int palette, int index)
 {
-    return STOPS[palette * STOP_COUNT + (index + STOP_COUNT) % STOP_COUNT];
+    return paletteStop(palette, (index + STOP_COUNT) % STOP_COUNT);
 }
 
 void main()
@@ -255,7 +255,7 @@ def build(library):
     # A short attack and a long release, so the aura swells and recedes instead of snapping.
     add_control_page(block, {"mode": "gate", "attack": 0.08, "hold": 0.25, "release": 0.6, "curve": 1.5, "velocitydepth": 0.7})
     page = block.appendCustomPage("Gradient Flow")
-    add_gradient_palette_menu(page)
+    add_palette_menu(page)
     add_float(page, "Rings", "Ring Density", 0.33, 0.0, 1.0, True, True)
     add_float(page, "Reach", "Reach", 0.6, 0.0, 1.0, True, True)
     add_float(page, "Flow", "Flow (in / out)", 0.65, 0.0, 1.0, True, True)
@@ -270,7 +270,7 @@ def build(library):
     add_text(block, "mask_shader", MASK_SHADER, -900, -150)
     add_text(block, "edge_shader", EDGE_SHADER, -700, -150)
     add_text(block, "jump_shader", JUMP_SHADER, -500, -150)
-    shader = MAP_SHADER.replace("@@PALETTE_GLSL@@", gradient_palette_glsl())
+    shader = palette_shader(MAP_SHADER)
     add_text(block, "map_shader", shader, -300, -150)
 
     source = add_top(block, inTOP, "in1", -1300)
@@ -327,7 +327,7 @@ def build(library):
     switch.inputConnectors[1].connect(node)
     switch.outputConnectors[0].connect(output)
 
-    effect = EFFECT_SOURCE.replace("@@PALETTE_INDEX@@", repr(GRADIENT_PALETTE_INDEX))
+    effect = palette_effect(EFFECT_SOURCE, PALETTE_INDEX=PALETTE_INDEX)
     add_text(block, "effect", effect, -500, -300)
     add_callbacks(block)
     return block

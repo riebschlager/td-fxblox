@@ -14,6 +14,11 @@ Use [Zoom Punch](blocks/zoom_punch.py) for stateless effects,
 names in the target build or [Derivative's documentation](https://docs.derivative.ca/).
 Record verified parameters in `tests/td_op_params.json`.
 
+Edit [palettes.py](palettes.py) to update the shared palette menus and colors.
+Each row has five distinct RGB hex stops in display order. The builder
+embeds the selected blocks' menus, GLSL tables and Python color data in the
+components. Rebuild affected blocks after changing the catalog.
+
 ## Block contract
 
 - Export a Base COMP with one `in1` In TOP and one `out1` Out TOP. Preserve input

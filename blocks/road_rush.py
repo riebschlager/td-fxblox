@@ -6,15 +6,23 @@ uniform vec4 uRoad;    // curve at the horizon, road half width, distance driven
 uniform vec4 uDash;    // dash duty, sun radius, sun spin, ink (lengths in wall heights)
 uniform vec4 uSky;     // sky color
 uniform vec4 uGround;  // ground color
-uniform vec4 uMisc;    // mix, shake x, shake y
+uniform vec4 uMisc;    // mix, shake x, shake y, palette (0 is brand)
 
 layout(location = 0) out vec4 fragColor;
 
 const float PI = 3.14159265359;
 const vec3 BLACK = vec3(0.0);
 const vec3 WHITE = vec3(1.0);
-const vec3 YELLOW = vec3(0.9529, 0.8667, 0.2431);
-const vec3 RED = vec3(1.0, 0.2588, 0.3020);
+const vec3 YELLOW = @@YELLOW@@;
+const vec3 RED = @@RED@@;
+@@PALETTE_GLSL@@
+@@PALETTE_HIGHLIGHTS@@
+
+vec3 roadAccent()
+{
+    int palette = int(uMisc.w) - 1;
+    return palette < 0 ? YELLOW : paletteHighlight(palette);
+}
 
 const float FAR = 10.0;         // past this depth everything is flat color, so the LEDs can't crawl
 const float DASH_PERIOD = 1.2;  // the three periods divide evenly, so the distance can wrap at 2.4
@@ -58,7 +66,7 @@ vec3 drawSky(vec2 point, float center, float horizon, float pixel)
     float spike = abs(fract(angle * SUN_POINTS / (2.0 * PI)) - 0.5) * 2.0;
     float edge = uDash.y * (1.0 + SUN_SPIKE * spike) - length(fromSun);
     color = mix(color, BLACK, cover(edge, pixel));
-    return mix(color, YELLOW, cover(edge - uDash.w, pixel));
+    return mix(color, roadAccent(), cover(edge - uDash.w, pixel));
 }
 
 void main()
@@ -116,7 +124,7 @@ void main()
         float dash = min(dashAcross, along);
         float footprint = max(xFootprint, zFootprint / halfWidth);
         road = mix(road, BLACK, cover(dash, footprint));
-        road = mix(road, YELLOW, cover(dash - ink, footprint));
+        road = mix(road, roadAccent(), cover(dash - ink, footprint));
     }
 
     vec3 ground = uGround.rgb;
@@ -125,7 +133,9 @@ void main()
         float band = (0.25 - abs(fract(travelled / GROUND_PERIOD) - 0.5)) * GROUND_PERIOD;
         ground = mix(BLACK, ground, cover(band, zFootprint));
         float stripe = (0.25 - abs(fract(travelled / RUMBLE_PERIOD) - 0.5)) * RUMBLE_PERIOD;
-        rumble = mix(WHITE, RED, cover(stripe, zFootprint));
+        int palette = int(uMisc.w) - 1;
+        vec3 stripeColor = palette < 0 ? RED : paletteStop(palette, 1);
+        rumble = mix(WHITE, stripeColor, cover(stripe, zFootprint));
     }
 
     // Only a landed road has edges. Fully flat, the picture mirrors past the
@@ -179,17 +189,8 @@ SCROLL_WRAP = 2.0       # one there-and-back of the mirrored video
 MAX_DT = 0.1
 TWO_PI = math.pi * 2.0
 
-BLUE = (0.1451, 0.4510, 1.0)
-PINK = (1.0, 0.5529, 1.0)
-YELLOW = (0.9529, 0.8667, 0.2431)
-RED = (1.0, 0.2588, 0.3020)
-CYAN = (0.2667, 0.9725, 1.0)
-THEMES = {
-    "blue": (BLUE, PINK),
-    "red": (RED, YELLOW),
-    "pink": (PINK, CYAN),
-    "cyan": (CYAN, BLUE),
-}
+THEMES = @@THEMES@@
+PALETTE_INDEX = @@PALETTE_INDEX@@
 
 _fired = None
 _last_seconds = None
@@ -322,7 +323,8 @@ def apply(block, env):
     duty = DASH_DUTY + (1.0 - DASH_DUTY) * _boost
     sun = _clamped(block.par.Sun) * SUN_RANGE * landed
     ink = _clamped(block.par.Ink) * INK_RANGE
-    sky, ground = THEMES.get(block.par.Sky.eval(), THEMES["blue"])
+    theme = block.par.Sky.eval()
+    sky, ground = THEMES.get(theme, THEMES["blue"])
     shake_x, shake_y = _rattle(block, env, now)
 
     _write(road, 0, tilt, depth_power, lean, 0.0 if flat else max(drop, 0.0001))
@@ -330,9 +332,10 @@ def apply(block, env):
     _write(road, 2, duty, sun, _distance * SUN_RATE * TWO_PI, ink)
     _write(road, 3, sky[0], sky[1], sky[2], 1.0)
     _write(road, 4, ground[0], ground[1], ground[2], 1.0)
-    _write(road, 5, _clamped(block.par.Mix), shake_x, shake_y)
+    _write(road, 5, _clamped(block.par.Mix), shake_x, shake_y, PALETTE_INDEX.get(theme, -1) + 1)
 '''
 
+SKY_PRESETS = {"blue": "pink", "red": "yellow", "pink": "cyan", "cyan": "blue"}
 UNIFORMS = ["uView", "uRoad", "uDash", "uSky", "uGround", "uMisc"]
 
 
@@ -348,13 +351,14 @@ def build(library):
     add_float(page, "Horizon", "Horizon", 0.5, 0.0, 1.0, True, True)
     add_float(page, "Roadwidth", "Road Width", 0.6, 0.0, 1.0, True, True)
     add_float(page, "Videoscroll", "Video Scroll", 1.0, 0.0, 1.0, True, True)
-    add_menu(page, "Sky", "Sky", ["blue", "red", "pink", "cyan"], ["Blue", "Red", "Pink", "Cyan"], "blue")
+    add_palette_menu(page, "Sky", "Sky", presets={name: name.title() for name in SKY_PRESETS}, default="blue")
     add_float(page, "Sun", "Sun", 0.5, 0.0, 1.0, True, True)
     add_float(page, "Ink", "Ink Line", 0.5, 0.0, 1.0, True, True)
     add_float(page, "Crash", "Crash", 0.6, 0.0, 1.0, True, True)
     add_float(page, "Mix", "Mix", 1.0, 0.0, 1.0, True, True)
 
-    add_text(block, "road_shader", SHADER, -300, -150)
+    shader = palette_shader(SHADER, YELLOW=glsl_rgb(SWATCH_RGB8["yellow"]), RED=glsl_rgb(SWATCH_RGB8["red"]))
+    add_text(block, "road_shader", shader, -300, -150)
 
     source = add_top(block, inTOP, "in1", -500)
     road = add_top(block, glslTOP, "road", -300)
@@ -376,6 +380,9 @@ def build(library):
     switch.inputConnectors[1].connect(road)
     switch.outputConnectors[0].connect(output)
 
-    add_text(block, "effect", EFFECT_SOURCE, -500, -300)
+    themes = {name: (SWATCH_RGB[name], SWATCH_RGB[ground]) for name, ground in SKY_PRESETS.items()}
+    themes.update({name: (row[3], row[0]) for name, row in PALETTE_RGB.items()})
+    effect = palette_effect(EFFECT_SOURCE, PALETTE_INDEX=PALETTE_INDEX, THEMES=themes)
+    add_text(block, "effect", effect, -500, -300)
     add_callbacks(block)
     return block
